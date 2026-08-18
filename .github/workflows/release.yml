@@ -131,7 +131,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(release-assets/*)
+          mapfile -d '' files < <(find release-assets -type f -print0)
           if [[ ${#files[@]} -eq 0 ]]; then
             echo "No installer files were produced."
             exit 1
