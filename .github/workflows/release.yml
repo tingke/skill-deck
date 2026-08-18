@@ -21,6 +21,8 @@ jobs:
   prepare-release:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
 
     steps:
       - name: Check out repository
@@ -42,12 +44,14 @@ jobs:
           fi
 
           if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"; then
-            gh release create "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$RELEASE_TAG" \
-              --draft \
-              --generate-notes \
-              --title "SkillDeck $RELEASE_TAG"
+            NOTES=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+              -f tag_name="$RELEASE_TAG" \
+              --jq '.body')
+            gh api "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$RELEASE_TAG" \
+              -f name="SkillDeck $RELEASE_TAG" \
+              -f body="$NOTES" \
+              -F draft=true
           fi
 
   build:
@@ -111,6 +115,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
 
     steps:
       - name: Download installers
@@ -138,6 +144,8 @@ jobs:
     needs: attach-assets
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write
 
     steps:
       - name: Publish release
