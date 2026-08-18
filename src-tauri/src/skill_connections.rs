@@ -1,7 +1,10 @@
 use crate::db::{AgentRow, SkillRow};
 use rusqlite::{params, Connection};
 use serde::Serialize;
+#[cfg(unix)]
 use std::os::unix::fs::symlink;
+#[cfg(windows)]
+use std::os::windows::fs::symlink_dir as symlink;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
