@@ -4,6 +4,16 @@ SkillDeck 是一个本地 AI Skill 管理器，用来集中管理 Skills、Promp
 
 它的核心目标不是把所有能力一直挂载到每个 Agent，而是维护一个可筛选、可编辑、可接线的本地能力库：需要哪些能力，就接入哪些能力；场景变了，就切换对应组合。
 
+## 预览
+
+![01-do](screenshots/01-do.png)
+
+![02-skill](screenshots/02-skill.png)
+
+![03-plugin](screenshots/03-plugin.png)
+
+![04-package](screenshots/04-package.png)
+
 ## 功能
 
 - **Skill 库源管理**：登记多个本地库源，扫描 `SKILL.md`，查看描述、标签、权限和内容。
@@ -62,6 +72,20 @@ macOS 数据目录：
 - `~/.skilldeck/skills`：全新安装的默认主库源
 
 已有 `ai-hub` 数据库会在首次启动 SkillDeck 时复制到新的数据目录，原文件保留不删。
+
+## 发布
+
+Release 由 GitHub Actions 自动构建：
+
+1. 提交并推送代码到 `main`。
+2. 创建版本标签并推送，例如 `v0.0.1`。
+3. `v*` 标签触发 `.github/workflows/release.yml`。
+4. Actions 构建 macOS universal DMG 和 Windows x64 安装包，自动生成 Release Notes 并发布到 GitHub Releases。
+
+```bash
+git tag v0.0.1
+git push origin v0.0.1
+```
 
 ## 项目结构
 
