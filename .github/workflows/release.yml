@@ -46,7 +46,7 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --target "$RELEASE_TAG" \
               --draft \
-              --generate-release-notes \
+              --generate-notes \
               --title "SkillDeck $RELEASE_TAG"
           fi
 
