@@ -1,4 +1,5 @@
 pub mod db;
+pub mod agent_activity;
 pub mod scanner;
 pub mod commands;
 pub mod packages;
@@ -12,7 +13,9 @@ pub mod skill_connections;
 use db::{DbState, open};
 use tauri::Manager;
 
- #[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub use agent_activity::run_hook_cli;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(DbState(std::sync::Mutex::new(open())))
@@ -164,6 +167,9 @@ pub fn run() {
            settings::open_data_dir,
            settings::check_update,
            settings::toggle_devtools,
+           agent_activity::get_hook_observer_status,
+           agent_activity::set_hook_observer_enabled,
+           agent_activity::get_agent_activity_snapshot,
       ])
        .run(tauri::generate_context!())
         .expect("error while running tauri application");

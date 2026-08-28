@@ -21,8 +21,22 @@ fn claude_settings_path() -> PathBuf {
     home().join(".claude").join("settings.json")
 }
 
+fn codex_hooks_path() -> PathBuf {
+    home().join(".codex").join("hooks.json")
+}
+
 fn codex_config_path() -> PathBuf {
     home().join(".codex").join("config.toml")
+}
+
+fn ensure_codex_hooks_feature() -> Result<(), String> {
+    let path = codex_config_path();
+    let raw = fs::read_to_string(&path).unwrap_or_default();
+    let updated = crate::agent_activity::enable_codex_hooks_feature(&raw)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, updated).map_err(|e| e.to_string())
 }
 
 fn codex_plugins_cache() -> PathBuf {
@@ -40,6 +54,7 @@ pub fn config_file_path(kind: &str, runtime: &str) -> String {
     match (kind, runtime) {
         ("mcp", "claude") => claude_json_path().to_string_lossy().to_string(),
         ("mcp", "codex") => codex_config_path().to_string_lossy().to_string(),
+        ("hook", "codex") => codex_hooks_path().to_string_lossy().to_string(),
         ("hook", _) => claude_settings_path().to_string_lossy().to_string(),
         ("plugin", _) => codex_config_path().to_string_lossy().to_string(),
         _ => String::new(),
@@ -96,35 +111,34 @@ pub fn scan_extensions(conn: &Connection) -> Vec<ExtensionRow> {
         }
     }
 
-    // Claude Hooks — ~/.claude/settings.json hooks
-    let cs = read_json(&claude_settings_path());
-    if let Some(hooks) = cs.get("hooks").and_then(|v| v.as_object()) {
-        for (event, entries) in hooks {
-            if let Some(arr) = entries.as_array() {
-                for entry in arr {
-                    let matcher = entry
-                        .get("matcher")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("*");
-                    if let Some(hook_list) = entry.get("hooks").and_then(|v| v.as_array()) {
-                        for h in hook_list {
-                            let command = h.get("command").and_then(|v| v.as_str()).unwrap_or("");
-                            let timeout = h.get("timeout").and_then(|v| v.as_i64()).unwrap_or(10);
-                            let id = format!("hook:claude:{}:{}", event, short_hash(command));
-                            let cfg = serde_json::json!({
-                                "matcher": matcher,
-                                "command": command,
-                                "timeout": timeout,
-                            });
-                            found.push(DiscoveredExt {
-                                id,
-                                kind: "hook".into(),
-                                runtime: "claude".into(),
-                                name: event.clone(),
-                                config_json: cfg.to_string(),
-                                enabled: true,
-                                description: command.chars().take(80).collect(),
-                            });
+    // Agent Hooks — Claude: ~/.claude/settings.json; Codex: ~/.codex/hooks.json
+    for (runtime, hook_config_path) in [("claude", claude_settings_path()), ("codex", codex_hooks_path())] {
+        let config = read_json(&hook_config_path);
+        if let Some(hooks) = config.get("hooks").and_then(|v| v.as_object()) {
+            for (event, entries) in hooks {
+                if let Some(arr) = entries.as_array() {
+                    for entry in arr {
+                        let matcher = entry.get("matcher").and_then(|v| v.as_str()).unwrap_or("*");
+                        if let Some(hook_list) = entry.get("hooks").and_then(|v| v.as_array()) {
+                            for hook in hook_list {
+                                let command = hook.get("command").and_then(|v| v.as_str()).unwrap_or("");
+                                let timeout = hook.get("timeout").and_then(|v| v.as_i64()).unwrap_or(10);
+                                let id = format!("hook:{}:{}:{}", runtime, event, short_hash(command));
+                                let cfg = serde_json::json!({
+                                    "matcher": matcher,
+                                    "command": command,
+                                    "timeout": timeout,
+                                });
+                                found.push(DiscoveredExt {
+                                    id,
+                                    kind: "hook".into(),
+                                    runtime: runtime.into(),
+                                    name: event.clone(),
+                                    config_json: cfg.to_string(),
+                                    enabled: true,
+                                    description: command.chars().take(80).collect(),
+                                });
+                            }
                         }
                     }
                 }
@@ -398,6 +412,7 @@ pub fn toggle_extension(conn: &Connection, id: &str, enabled: bool) -> Result<()
         ("mcp", "claude") => toggle_claude_mcp(&name, &config_json, enabled)?,
         ("mcp", "codex") => toggle_codex_mcp(&name, enabled)?,
         ("hook", "claude") => toggle_claude_hook(&name, &config_json, enabled)?,
+        ("hook", "codex") => toggle_codex_hook(&name, &config_json, enabled)?,
         ("plugin", "codex") => toggle_codex_plugin(&config_json, enabled)?,
         _ => return Err(format!("unsupported: {} {}", kind, runtime)),
     }
@@ -446,8 +461,7 @@ fn toggle_codex_mcp(name: &str, enabled: bool) -> Result<(), String> {
     fs::write(&path, out).map_err(|e| e.to_string())
 }
 
-fn toggle_claude_hook(event: &str, config_json: &str, enabled: bool) -> Result<(), String> {
-    let path = claude_settings_path();
+fn toggle_agent_hook(path: PathBuf, event: &str, config_json: &str, enabled: bool) -> Result<(), String> {
     let mut root = read_json(&path);
     let hooks = root
         .get_mut("hooks")
@@ -496,6 +510,18 @@ fn toggle_claude_hook(event: &str, config_json: &str, enabled: bool) -> Result<(
         }
     }
     write_json(&path, &root)
+}
+
+fn toggle_claude_hook(event: &str, config_json: &str, enabled: bool) -> Result<(), String> {
+    toggle_agent_hook(claude_settings_path(), event, config_json, enabled)
+}
+
+fn toggle_codex_hook(event: &str, config_json: &str, enabled: bool) -> Result<(), String> {
+    toggle_agent_hook(codex_hooks_path(), event, config_json, enabled)?;
+    if enabled {
+        ensure_codex_hooks_feature()?;
+    }
+    Ok(())
 }
 
 fn toggle_codex_plugin(config_json: &str, enabled: bool) -> Result<(), String> {
@@ -658,14 +684,20 @@ pub fn save_hook(conn: &Connection, input: &HookInput) -> Result<(), String> {
         "timeout": input.timeout,
     });
 
-    // Only Claude supports hooks
-    toggle_claude_hook(&input.event, &cfg.to_string(), true)?;
+    if !matches!(input.runtime.as_str(), "claude" | "codex") {
+        return Err(format!("unsupported hook runtime: {}", input.runtime));
+    }
+    if input.runtime == "claude" {
+        toggle_claude_hook(&input.event, &cfg.to_string(), true)?;
+    } else {
+        toggle_codex_hook(&input.event, &cfg.to_string(), true)?;
+    }
 
     conn.execute(
         "INSERT INTO extensions (id, kind, runtime, name, config_json, enabled, description, source, created_at, updated_at)
-         VALUES (?1,'hook','claude',?2,?3,1,?4,'manual',?5,?5)
+         VALUES (?1,'hook',?2,?3,?4,1,?5,'manual',?6,?6)
          ON CONFLICT(id) DO UPDATE SET config_json=excluded.config_json, updated_at=excluded.updated_at",
-        params![id, input.event, cfg.to_string(), input.command.chars().take(80).collect::<String>(), now_iso()],
+        params![id, input.runtime, input.event, cfg.to_string(), input.command.chars().take(80).collect::<String>(), now_iso()],
     )
     .ok();
 
@@ -706,6 +738,9 @@ pub fn delete_extension(conn: &Connection, id: &str) -> Result<(), String> {
         }
         ("hook", "claude") => {
             toggle_claude_hook(&name, &config_json, false)?;
+        }
+        ("hook", "codex") => {
+            toggle_codex_hook(&name, &config_json, false)?;
         }
         ("plugin", "codex") => {
             let path = codex_config_path();
