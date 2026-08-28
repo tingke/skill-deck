@@ -1,14 +1,15 @@
-use crate::db::{DbState, SkillRow, ActivityLog, PromptRow, RuleRow, RuntimeInfo, now_iso, log_activity, db_enabled_agents, AgentRow, LibrarySourceRow, db_library_sources, db_enabled_library_sources};
-use crate::scanner;
-use crate::projects;
-use crate::skill_connections::{
-    self, SkillConnectionState,
+use crate::db::{
+    db_enabled_agents, db_enabled_library_sources, db_library_sources, log_activity, now_iso,
+    ActivityLog, AgentRow, DbState, LibrarySourceRow, PromptRow, RuleRow, RuntimeInfo, SkillRow,
 };
+use crate::projects;
+use crate::scanner;
+use crate::skill_connections::{self, SkillConnectionState};
 use rusqlite::params;
-use std::fs;
-use std::path::PathBuf;
-use std::path::Path;
 use serde::Serialize;
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
 use tauri::State;
 
 /// Look up an enabled agent config from DB by id.
@@ -16,6 +17,19 @@ fn db_agent_by_id(conn: &rusqlite::Connection, id: &str) -> Option<AgentRow> {
     db_enabled_agents(conn).into_iter().find(|a| a.id == id)
 }
 
+fn resolve_library_path(path: &str) -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_default();
+    if let Some(rest) = path.strip_prefix("~/") {
+        return home.join(rest);
+    }
+    if path == "~" {
+        return home;
+    }
+    if Path::new(path).is_absolute() {
+        return PathBuf::from(path);
+    }
+    home.join(path)
+}
 
 /// 在访达中定位（高亮）给定文件/目录。无论入口是文件还是目录，都在父目录中选中它。
 fn open_reveal_arguments() -> [&'static str; 1] {
@@ -58,12 +72,12 @@ pub fn get_runtimes(db: State<DbState>) -> Result<Vec<RuntimeInfo>, String> {
                 .join(&a.skills_dir)
                 .to_string_lossy()
                 .to_string(),
-           auto_scan: a.auto_scan,
-           scan_agents_dir: a.scan_agents_dir,
-           config_dir: a.config_dir,
-           mcp_config_file: a.mcp_config_file,
-           enabled: a.enabled,
-           sort_order: a.sort_order,
+            auto_scan: a.auto_scan,
+            scan_agents_dir: a.scan_agents_dir,
+            config_dir: a.config_dir,
+            mcp_config_file: a.mcp_config_file,
+            enabled: a.enabled,
+            sort_order: a.sort_order,
         })
         .collect())
 }
@@ -89,9 +103,7 @@ pub fn get_skill_connections(
     let skill = skill_connections::get_skill(&conn, &skill_id)?;
     let agents = db_enabled_agents(&conn);
     Ok(skill_connections::skill_connection_states(
-        &conn,
-        &skill,
-        &agents,
+        &conn, &skill, &agents,
     ))
 }
 
@@ -103,12 +115,8 @@ pub fn adopt_real_entry(
     library_source_id: String,
 ) -> Result<SkillConnectionState, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let state = skill_connections::adopt_real_entry(
-        &conn,
-        &skill_id,
-        &agent_id,
-        &library_source_id,
-    )?;
+    let state =
+        skill_connections::adopt_real_entry(&conn, &skill_id, &agent_id, &library_source_id)?;
     log_activity(
         &conn,
         "adopt_skill",
@@ -130,25 +138,29 @@ pub(crate) fn runtime_skills_dir(runtime: &str, conn: &rusqlite::Connection) -> 
     let custom: Option<String> = conn
         .query_row(
             "SELECT value FROM settings WHERE key = ?1",
-             params![key],
-             |row| row.get(0),
-         )
-         .ok();
-     match custom {
-         Some(p) => PathBuf::from(p),
-         None => default,
-     }
+            params![key],
+            |row| row.get(0),
+        )
+        .ok();
+    match custom {
+        Some(p) => PathBuf::from(p),
+        None => default,
+    }
 }
 
- /// 扫描所有 runtime 目录，刷新 skill 列表
- #[tauri::command]
+/// 扫描所有 runtime 目录，刷新 skill 列表
+#[tauri::command]
 pub fn scan_all(db: State<DbState>, log: Option<bool>) -> Result<Vec<SkillRow>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
     // 备份现有 path→tags，防止 skill id 变化时标签丢失
     let mut path_tags: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT path, tags FROM skills WHERE tags IS NOT NULL AND tags != '[]'") {
-        if let Ok(rows) = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))) {
+    if let Ok(mut stmt) =
+        conn.prepare("SELECT path, tags FROM skills WHERE tags IS NOT NULL AND tags != '[]'")
+    {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
             for r in rows.flatten() {
                 path_tags.insert(r.0, r.1);
             }
@@ -158,17 +170,20 @@ pub fn scan_all(db: State<DbState>, log: Option<bool>) -> Result<Vec<SkillRow>, 
     // 扫描所有已启用的库源目录
     let mut found_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     for lib in db_enabled_library_sources(&conn) {
-        let dir = if lib.path.starts_with("/") {
-            std::path::PathBuf::from(&lib.path)
-        } else {
-            dirs::home_dir().unwrap_or_default().join(&lib.path)
-        };
-        found_ids.extend(scanner::scan_library_source(&conn, &lib.id, &lib.name, &dir.to_string_lossy()));
+        let dir = resolve_library_path(&lib.path);
+        found_ids.extend(scanner::scan_library_source(
+            &conn,
+            &lib.id,
+            &lib.name,
+            &dir.to_string_lossy(),
+        ));
     }
 
     // 扫描所有项目目录下各 agent 的 skills（遍历 <project>/<agent.skills_dir>）
     {
-        let mut stmt = conn.prepare("SELECT id, name, path FROM projects").map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id, name, path FROM projects")
+            .map_err(|e| e.to_string())?;
         let projs: Vec<(String, String, String)> = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
             .map_err(|e| e.to_string())?
@@ -181,22 +196,53 @@ pub fn scan_all(db: State<DbState>, log: Option<bool>) -> Result<Vec<SkillRow>, 
 
     // 把备份的 tags 按 path 还原到新扫描出的 skill 行（应对 id 前缀变化的场景）
     if !path_tags.is_empty() {
-        let mut stmt = conn.prepare("SELECT id, path FROM skills").map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id, path FROM skills")
+            .map_err(|e| e.to_string())?;
         let new_rows: Vec<(String, String)> = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
         for (id, path) in &new_rows {
             if let Some(tags) = path_tags.get(path) {
-                conn.execute("UPDATE skills SET tags = ?1 WHERE id = ?2 AND tags = '[]'", params![tags, id]).ok();
+                conn.execute(
+                    "UPDATE skills SET tags = ?1 WHERE id = ?2 AND tags = '[]'",
+                    params![tags, id],
+                )
+                .ok();
             }
         }
     }
 
+    // 从持久化标签备份恢复（应对 skill 行被 orphan cleanup 删除后重建的跨调用场景）
+    conn.execute(
+        "UPDATE skills SET tags = (
+            SELECT b.tags FROM skill_tag_backup b WHERE b.path = skills.path
+         )
+         WHERE skills.tags = '[]'
+           AND EXISTS (
+            SELECT 1 FROM skill_tag_backup b WHERE b.path = skills.path AND b.tags != '[]'
+           )",
+        [],
+    )
+    .ok();
+    // 用当前非空标签刷新持久化备份
+    conn.execute(
+        "INSERT INTO skill_tag_backup (path, tags, updated_at)
+         SELECT path, tags, ?1 FROM skills WHERE tags IS NOT NULL AND tags != '[]'
+         ON CONFLICT(path) DO UPDATE SET tags = excluded.tags, updated_at = excluded.updated_at",
+        params![now_iso()],
+    )
+    .ok();
+
     // 清理不再存在的 skill 及其 connections（orphan cleanup）
     let stale: Vec<String> = {
-        let mut stmt = conn.prepare("SELECT id FROM skills").map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id FROM skills")
+            .map_err(|e| e.to_string())?;
         let rows: Vec<String> = stmt
             .query_map([], |row| row.get::<_, String>(0))
             .map_err(|e| e.to_string())?
@@ -206,123 +252,151 @@ pub fn scan_all(db: State<DbState>, log: Option<bool>) -> Result<Vec<SkillRow>, 
         rows
     };
     for id in &stale {
-        conn.execute("DELETE FROM connections WHERE skill_id = ?1", params![id]).ok();
-        conn.execute("DELETE FROM skills WHERE id = ?1", params![id]).ok();
+        conn.execute("DELETE FROM connections WHERE skill_id = ?1", params![id])
+            .ok();
+        conn.execute("DELETE FROM skills WHERE id = ?1", params![id])
+            .ok();
     }
 
     let skills = scanner::get_all_skills(&conn);
     if log.unwrap_or(false) {
-        log_activity(&conn, "scan", &format!("扫描完成，共 {} 个 skill", skills.len()));
+        log_activity(
+            &conn,
+            "scan",
+            &format!("扫描完成，共 {} 个 skill", skills.len()),
+        );
     }
     Ok(skills)
- }
+}
 
- /// 获取所有 skill
- #[tauri::command]
- pub fn get_skills(db: State<DbState>) -> Result<Vec<SkillRow>, String> {
-     let conn = db.0.lock().map_err(|e| e.to_string())?;
-     Ok(scanner::get_all_skills(&conn))
- }
+/// 获取所有 skill
+#[tauri::command]
+pub fn get_skills(db: State<DbState>) -> Result<Vec<SkillRow>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    Ok(scanner::get_all_skills(&conn))
+}
 
- /// 接线一个 skill 到指定 Runtime（建 symlink）
- #[tauri::command]
-pub fn connect_skill(
+/// 接线一个 skill 到指定 Runtime（建 symlink）
+#[tauri::command]
+pub fn connect_skill(db: State<DbState>, skill_id: String, agent_id: String) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    skill_connections::connect_skill_connection(&conn, &skill_id, &agent_id)?;
+    let name: String = conn
+        .query_row(
+            "SELECT name FROM skills WHERE id = ?1",
+            params![skill_id],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| skill_id.clone());
+    log_activity(&conn, "connect", &format!("{} -> {}", name, agent_id));
+    Ok(())
+}
+
+/// 断开一个 skill 的连接（删 symlink）
+#[tauri::command]
+pub fn disconnect_skill(
     db: State<DbState>,
     skill_id: String,
-     agent_id: String,
+    agent_id: String,
+    confirmed_shared: bool,
 ) -> Result<(), String> {
-     let conn = db.0.lock().map_err(|e| e.to_string())?;
-     skill_connections::connect_skill_connection(&conn, &skill_id, &agent_id)?;
-     let name: String = conn
-         .query_row("SELECT name FROM skills WHERE id = ?1", params![skill_id], |row| row.get(0))
-         .unwrap_or_else(|_| skill_id.clone());
-     log_activity(&conn, "connect", &format!("{} -> {}", name, agent_id));
-     Ok(())
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    skill_connections::disconnect_skill_connection(&conn, &skill_id, &agent_id, confirmed_shared)?;
+    let name: String = conn
+        .query_row(
+            "SELECT name FROM skills WHERE id = ?1",
+            params![skill_id],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| skill_id.clone());
+    log_activity(&conn, "disconnect", &format!("{} x {}", name, agent_id));
+    Ok(())
 }
 
- /// 断开一个 skill 的连接（删 symlink）
- #[tauri::command]
-pub fn disconnect_skill(
-     db: State<DbState>,
-     skill_id: String,
-     agent_id: String,
-     confirmed_shared: bool,
-) -> Result<(), String> {
-     let conn = db.0.lock().map_err(|e| e.to_string())?;
-     skill_connections::disconnect_skill_connection(
-         &conn,
-         &skill_id,
-         &agent_id,
-         confirmed_shared,
-     )?;
-     let name: String = conn
-         .query_row("SELECT name FROM skills WHERE id = ?1", params![skill_id], |row| row.get(0))
-         .unwrap_or_else(|_| skill_id.clone());
-     log_activity(&conn, "disconnect", &format!("{} x {}", name, agent_id));
-     Ok(())
-}
-
- /// 批量接线/断开（用于预设切换）
- #[tauri::command]
+/// 批量接线/断开（用于预设切换）
+#[tauri::command]
 pub fn batch_connect(
-     db: State<DbState>,
-     connect_ids: Vec<String>,
+    db: State<DbState>,
+    connect_ids: Vec<String>,
     disconnect_ids: Vec<String>,
     agent_id: String,
     confirmed_shared: bool,
 ) -> Result<(), String> {
-     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
 
-     for skill_id in &connect_ids {
-         skill_connections::connect_skill_connection(&conn, skill_id, &agent_id)?;
-     }
+    for skill_id in &connect_ids {
+        skill_connections::connect_skill_connection(&conn, skill_id, &agent_id)?;
+    }
 
-     for skill_id in &disconnect_ids {
-         skill_connections::disconnect_skill_connection(
+    for skill_id in &disconnect_ids {
+        skill_connections::disconnect_skill_connection(
             &conn,
             skill_id,
             &agent_id,
             confirmed_shared,
-         )?;
-     }
+        )?;
+    }
 
-     log_activity(&conn, "batch", &format!("+{} -{} ({})", connect_ids.len(), disconnect_ids.len(), agent_id));
-     Ok(())
+    log_activity(
+        &conn,
+        "batch",
+        &format!(
+            "+{} -{} ({})",
+            connect_ids.len(),
+            disconnect_ids.len(),
+            agent_id
+        ),
+    );
+    Ok(())
 }
 
- /// 读取 SKILL.md 内容
- #[tauri::command]
- pub fn read_skill_file(db: State<DbState>, skill_id: String) -> Result<String, String> {
-     let conn = db.0.lock().map_err(|e| e.to_string())?;
-     let path: String = conn
-         .query_row("SELECT path FROM skills WHERE id = ?1", params![skill_id], |row| row.get(0))
-         .map_err(|_| "skill not found".to_string())?;
+/// 读取 SKILL.md 内容
+#[tauri::command]
+pub fn read_skill_file(db: State<DbState>, skill_id: String) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let path: String = conn
+        .query_row(
+            "SELECT path FROM skills WHERE id = ?1",
+            params![skill_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| "skill not found".to_string())?;
 
     let skill_md = skill_connections::active_manifest_path(Path::new(&path))
         .ok_or_else(|| "skill manifest not found".to_string())?;
     fs::read_to_string(&skill_md).map_err(|e| format!("读取失败: {}", e))
- }
+}
 
- /// 写入 SKILL.md 内容
- #[tauri::command]
- pub fn write_skill_file(db: State<DbState>, skill_id: String, content: String) -> Result<(), String> {
-     let conn = db.0.lock().map_err(|e| e.to_string())?;
-     let path: String = conn
-         .query_row("SELECT path FROM skills WHERE id = ?1", params![skill_id], |row| row.get(0))
-         .map_err(|_| "skill not found".to_string())?;
+/// 写入 SKILL.md 内容
+#[tauri::command]
+pub fn write_skill_file(
+    db: State<DbState>,
+    skill_id: String,
+    content: String,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let path: String = conn
+        .query_row(
+            "SELECT path FROM skills WHERE id = ?1",
+            params![skill_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| "skill not found".to_string())?;
 
     let skill_md = skill_connections::active_manifest_path(Path::new(&path))
         .ok_or_else(|| "skill manifest not found".to_string())?;
     fs::write(&skill_md, &content).map_err(|e| format!("写入失败: {}", e))?;
-     Ok(())
- }
+    Ok(())
+}
 
 /// 获取最近活动日志
 #[tauri::command]
 pub fn get_recent_activity(db: State<DbState>) -> Result<Vec<ActivityLog>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, action, detail, created_at FROM activity_log ORDER BY id DESC LIMIT 10")
+        .prepare(
+            "SELECT id, action, detail, created_at FROM activity_log ORDER BY id DESC LIMIT 10",
+        )
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
@@ -345,27 +419,45 @@ pub fn delete_skill(db: State<DbState>, skill_id: String) -> Result<(), String> 
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
     let path: String = conn
-        .query_row("SELECT path FROM skills WHERE id = ?1", params![skill_id], |row| row.get(0))
+        .query_row(
+            "SELECT path FROM skills WHERE id = ?1",
+            params![skill_id],
+            |row| row.get(0),
+        )
         .map_err(|_| "skill not found".to_string())?;
     let name: String = conn
-        .query_row("SELECT name FROM skills WHERE id = ?1", params![skill_id], |row| row.get(0))
+        .query_row(
+            "SELECT name FROM skills WHERE id = ?1",
+            params![skill_id],
+            |row| row.get(0),
+        )
         .unwrap_or_else(|_| skill_id.clone());
 
     // 移除所有 runtime 的 symlink
     for rt in db_enabled_agents(&conn) {
         let dir = runtime_skills_dir(&rt.id, &conn);
         let dir_name = std::path::Path::new(&path)
-            .file_name().unwrap_or_default().to_string_lossy().to_string();
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let sym = dir.join(&dir_name);
-        if sym.is_symlink() { fs::remove_file(&sym).ok(); }
+        if sym.is_symlink() {
+            fs::remove_file(&sym).ok();
+        }
     }
 
     // 删除实际目录
     fs::remove_dir_all(&path).map_err(|e| format!("删除目录失败: {}", e))?;
 
     // 清理 DB
-    conn.execute("DELETE FROM connections WHERE skill_id = ?1", params![skill_id]).ok();
-    conn.execute("DELETE FROM skills WHERE id = ?1", params![skill_id]).ok();
+    conn.execute(
+        "DELETE FROM connections WHERE skill_id = ?1",
+        params![skill_id],
+    )
+    .ok();
+    conn.execute("DELETE FROM skills WHERE id = ?1", params![skill_id])
+        .ok();
 
     log_activity(&conn, "delete", &name);
     Ok(())
@@ -373,17 +465,44 @@ pub fn delete_skill(db: State<DbState>, skill_id: String) -> Result<(), String> 
 
 /// 更新 skill 标签
 #[tauri::command]
-pub fn update_skill_tags(db: State<DbState>, skill_id: String, tags: Vec<String>) -> Result<(), String> {
+pub fn update_skill_tags(
+    db: State<DbState>,
+    skill_id: String,
+    tags: Vec<String>,
+) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".into());
-    conn.execute("UPDATE skills SET tags = ?1, updated_at = ?2 WHERE id = ?3", params![tags_json, now_iso(), skill_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE skills SET tags = ?1, updated_at = ?2 WHERE id = ?3",
+        params![tags_json, now_iso(), skill_id],
+    )
+    .map_err(|e| e.to_string())?;
+    // 同步写入持久化备份，避免 skill 行重建后标签丢失
+    let path: Option<String> = conn
+        .query_row(
+            "SELECT path FROM skills WHERE id = ?1",
+            params![skill_id],
+            |row| row.get(0),
+        )
+        .ok();
+    if let Some(path) = path {
+        conn.execute(
+            "INSERT INTO skill_tag_backup (path, tags, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(path) DO UPDATE SET tags = ?2, updated_at = ?3",
+            params![path, tags_json, now_iso()],
+        )
+        .ok();
+    }
     Ok(())
 }
 
 /// 切换 skill 的启用/停用状态（只重命名 manifest，不改变任何连接）
 #[tauri::command]
-pub fn toggle_skill_enabled(db: State<DbState>, skill_id: String, enabled: bool) -> Result<(), String> {
+pub fn toggle_skill_enabled(
+    db: State<DbState>,
+    skill_id: String,
+    enabled: bool,
+) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let path: String = conn
         .query_row(
@@ -396,7 +515,11 @@ pub fn toggle_skill_enabled(db: State<DbState>, skill_id: String, enabled: bool)
     rename_skill_manifest(Path::new(&path), enabled)?;
 
     let name: String = conn
-        .query_row("SELECT name FROM skills WHERE id = ?1", params![skill_id], |row| row.get(0))
+        .query_row(
+            "SELECT name FROM skills WHERE id = ?1",
+            params![skill_id],
+            |row| row.get(0),
+        )
         .unwrap_or_else(|_| skill_id.clone());
     conn.execute(
         "UPDATE skills SET enabled = ?1, updated_at = ?2 WHERE id = ?3",
@@ -404,7 +527,15 @@ pub fn toggle_skill_enabled(db: State<DbState>, skill_id: String, enabled: bool)
     )
     .map_err(|e| e.to_string())?;
     let flag = if enabled { 1 } else { 0 };
-    log_activity(&conn, "toggle_skill", &format!("{} skill: {}", if flag == 1 { "启用" } else { "停用" }, name));
+    log_activity(
+        &conn,
+        "toggle_skill",
+        &format!(
+            "{} skill: {}",
+            if flag == 1 { "启用" } else { "停用" },
+            name
+        ),
+    );
     Ok(())
 }
 
@@ -421,7 +552,10 @@ fn rename_skill_manifest(skill_path: &Path, enabled: bool) -> Result<(), String>
         ));
     }
     if !active_exists && !disabled_exists {
-        return Err(format!("{:?} 缺少 SKILL.md 或 SKILL.md.disabled", skill_path));
+        return Err(format!(
+            "{:?} 缺少 SKILL.md 或 SKILL.md.disabled",
+            skill_path
+        ));
     }
 
     if enabled && disabled_exists {
@@ -460,6 +594,18 @@ mod manifest_tests {
     #[test]
     fn reveal_arguments_highlight_directories_and_files() {
         assert_eq!(open_reveal_arguments(), ["-R"]);
+    }
+
+    #[test]
+    fn resolves_library_home_paths() {
+        let home = dirs::home_dir().unwrap_or_default();
+        assert_eq!(resolve_library_path("~"), home);
+        assert_eq!(resolve_library_path("~/skills"), home.join("skills"));
+        assert_eq!(resolve_library_path("skills"), home.join("skills"));
+        assert_eq!(
+            resolve_library_path("/tmp/skills"),
+            PathBuf::from("/tmp/skills")
+        );
     }
 
     #[test]
@@ -519,7 +665,11 @@ fn build_file_tree(dir: &Path, base: &Path) -> Vec<SkillFileEntry> {
         if name.starts_with('.') {
             continue;
         }
-        let relative = path.strip_prefix(base).unwrap_or(&path).to_string_lossy().to_string();
+        let relative = path
+            .strip_prefix(base)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
         let meta = match entry.metadata() {
             Ok(m) => m,
             Err(_) => continue,
@@ -531,24 +681,35 @@ fn build_file_tree(dir: &Path, base: &Path) -> Vec<SkillFileEntry> {
         } else {
             Vec::new()
         };
-        entries.push(SkillFileEntry { name, path: relative, is_dir, size, children });
+        entries.push(SkillFileEntry {
+            name,
+            path: relative,
+            is_dir,
+            size,
+            children,
+        });
     }
-    entries.sort_by(|a, b| {
-        match (a.is_dir, b.is_dir) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.cmp(&b.name),
-        }
+    entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.cmp(&b.name),
     });
     entries
 }
 
 /// List all files in a skill directory as a tree
 #[tauri::command]
-pub fn list_skill_files(db: State<DbState>, skill_id: String) -> Result<Vec<SkillFileEntry>, String> {
+pub fn list_skill_files(
+    db: State<DbState>,
+    skill_id: String,
+) -> Result<Vec<SkillFileEntry>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let path: String = conn
-        .query_row("SELECT path FROM skills WHERE id = ?1", params![skill_id], |row| row.get(0))
+        .query_row(
+            "SELECT path FROM skills WHERE id = ?1",
+            params![skill_id],
+            |row| row.get(0),
+        )
         .map_err(|_| "skill not found".to_string())?;
     let dir = PathBuf::from(&path);
     Ok(build_file_tree(&dir, &dir))
@@ -556,13 +717,23 @@ pub fn list_skill_files(db: State<DbState>, skill_id: String) -> Result<Vec<Skil
 
 /// Read a specific file in a skill directory by relative path
 #[tauri::command]
-pub fn read_skill_file_path(db: State<DbState>, skill_id: String, file_path: String) -> Result<String, String> {
+pub fn read_skill_file_path(
+    db: State<DbState>,
+    skill_id: String,
+    file_path: String,
+) -> Result<String, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let base: String = conn
-        .query_row("SELECT path FROM skills WHERE id = ?1", params![skill_id], |row| row.get(0))
+        .query_row(
+            "SELECT path FROM skills WHERE id = ?1",
+            params![skill_id],
+            |row| row.get(0),
+        )
         .map_err(|_| "skill not found".to_string())?;
     let full = PathBuf::from(&base).join(&file_path);
-    let canonical_base = PathBuf::from(&base).canonicalize().map_err(|e| e.to_string())?;
+    let canonical_base = PathBuf::from(&base)
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
     let canonical_full = full.canonicalize().map_err(|e| e.to_string())?;
     if !canonical_full.starts_with(&canonical_base) {
         return Err("path outside skill directory".to_string());
@@ -588,7 +759,14 @@ pub fn save_library_source(db: State<DbState>, source: LibrarySourceRow) -> Resu
          ON CONFLICT(id) DO UPDATE SET
            name=excluded.name, path=excluded.path, enabled=excluded.enabled,
            sort_order=excluded.sort_order, updated_at=?6",
-        params![source.id, source.name, source.path, source.enabled as i32, source.sort_order, ts],
+        params![
+            source.id,
+            source.name,
+            source.path,
+            source.enabled as i32,
+            source.sort_order,
+            ts
+        ],
     )
     .map_err(|e| e.to_string())?;
     log_activity(&conn, "library_source_save", &source.name);
@@ -601,15 +779,19 @@ pub fn delete_library_source(db: State<DbState>, id: String) -> Result<(), Strin
     // 删除该库源下的所有 skill 及其 connections
     let skill_ids: Vec<String> = {
         let prefix = format!("{}:", id);
-        let mut stmt = conn.prepare("SELECT id FROM skills WHERE id LIKE ?1")
+        let mut stmt = conn
+            .prepare("SELECT id FROM skills WHERE id LIKE ?1")
             .map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([&prefix], |row| row.get::<_, String>(0))
+        let rows = stmt
+            .query_map([&prefix], |row| row.get::<_, String>(0))
             .map_err(|e| e.to_string())?;
         rows.filter_map(|r| r.ok()).collect()
     };
     for sid in &skill_ids {
-        conn.execute("DELETE FROM connections WHERE skill_id = ?1", params![sid]).ok();
-        conn.execute("DELETE FROM skills WHERE id = ?1", params![sid]).ok();
+        conn.execute("DELETE FROM connections WHERE skill_id = ?1", params![sid])
+            .ok();
+        conn.execute("DELETE FROM skills WHERE id = ?1", params![sid])
+            .ok();
     }
     conn.execute("DELETE FROM library_sources WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
@@ -623,7 +805,9 @@ pub fn delete_library_source(db: State<DbState>, id: String) -> Result<(), Strin
 pub fn get_prompts(db: State<DbState>) -> Result<Vec<PromptRow>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, title, content, tags, source FROM prompts ORDER BY title COLLATE NOCASE")
+        .prepare(
+            "SELECT id, title, content, tags, source FROM prompts ORDER BY title COLLATE NOCASE",
+        )
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
@@ -658,7 +842,13 @@ pub fn save_prompt(
                 params![title, content, tags_json, now_iso(), i],
             )
             .map_err(|e| e.to_string())?;
-            Ok(PromptRow { id: i, title, content, tags, source: "manual".into() })
+            Ok(PromptRow {
+                id: i,
+                title,
+                content,
+                tags,
+                source: "manual".into(),
+            })
         }
         None => {
             conn.execute(
@@ -730,7 +920,15 @@ pub fn save_rule(
                 params![title, content, platform, target_path, tags_json, now_iso(), i],
             )
             .map_err(|e| e.to_string())?;
-            Ok(RuleRow { id: i, title, content, platform, target_path, tags, source: "manual".into() })
+            Ok(RuleRow {
+                id: i,
+                title,
+                content,
+                platform,
+                target_path,
+                tags,
+                source: "manual".into(),
+            })
         }
         None => {
             conn.execute(
@@ -740,7 +938,11 @@ pub fn save_rule(
             .map_err(|e| e.to_string())?;
             Ok(RuleRow {
                 id: conn.last_insert_rowid(),
-                title, content, platform, target_path, tags,
+                title,
+                content,
+                platform,
+                target_path,
+                tags,
                 source: "manual".into(),
             })
         }
@@ -817,7 +1019,7 @@ pub fn apply_rule(db: State<DbState>, id: i64) -> Result<String, String> {
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-        let header = format!("\n<!-- SkillDeck · {} -->\n", title);
+    let header = format!("\n<!-- SkillDeck · {} -->\n", title);
     if target.exists() {
         let existing = fs::read_to_string(&target).unwrap_or_default();
         let marker = content.trim();
@@ -886,8 +1088,13 @@ pub fn scan_rules(db: State<DbState>) -> Result<Vec<RuleRow>, String> {
         };
         for file_name in &files {
             let fp = config_path.join(file_name);
-            if !fp.is_file() { continue; }
-            let content = match fs::read_to_string(&fp) { Ok(c) => c, Err(_) => continue };
+            if !fp.is_file() {
+                continue;
+            }
+            let content = match fs::read_to_string(&fp) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
             let abs = fp.to_string_lossy().to_string();
             let title = format!("{} · {}", agent.label, file_name);
             new_count += upsert_scanned_rule(&conn, &title, &content, &agent.id, &abs)?;
@@ -897,7 +1104,8 @@ pub fn scan_rules(db: State<DbState>) -> Result<Vec<RuleRow>, String> {
     if cursorrules.is_file() {
         if let Ok(content) = fs::read_to_string(&cursorrules) {
             let abs = cursorrules.to_string_lossy().to_string();
-            new_count += upsert_scanned_rule(&conn, "Cursor · .cursorrules", &content, "cursor", &abs)?;
+            new_count +=
+                upsert_scanned_rule(&conn, "Cursor · .cursorrules", &content, "cursor", &abs)?;
         }
     }
     let cursor_rules_dir = home.join(".cursor").join("rules");
@@ -905,14 +1113,29 @@ pub fn scan_rules(db: State<DbState>) -> Result<Vec<RuleRow>, String> {
         if let Ok(entries) = fs::read_dir(&cursor_rules_dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.extension().and_then(|e| e.to_str()) != Some("mdc") { continue; }
-                let content = match fs::read_to_string(&p) { Ok(c) => c, Err(_) => continue };
+                if p.extension().and_then(|e| e.to_str()) != Some("mdc") {
+                    continue;
+                }
+                let content = match fs::read_to_string(&p) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
                 let fname = p.file_name().unwrap().to_string_lossy().to_string();
                 let abs = p.to_string_lossy().to_string();
-                new_count += upsert_scanned_rule(&conn, &format!("Cursor · {}", fname), &content, "cursor", &abs)?;
+                new_count += upsert_scanned_rule(
+                    &conn,
+                    &format!("Cursor · {}", fname),
+                    &content,
+                    "cursor",
+                    &abs,
+                )?;
             }
         }
     }
-    log_activity(&conn, "rule_scan", &format!("扫描完成，新增 {} 条", new_count));
+    log_activity(
+        &conn,
+        "rule_scan",
+        &format!("扫描完成，新增 {} 条", new_count),
+    );
     Ok(query_rules(&conn))
 }

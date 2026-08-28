@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -7,10 +7,34 @@ pub struct DbState(pub Mutex<Connection>);
 
 /// All runtimes the app manages. Add new runtimes here.
 pub const RUNTIMES: &[RuntimeConfig] = &[
-    RuntimeConfig { id: "claude", label: "Claude", dir: ".claude/skills", color: "orange", auto_scan: false },
-    RuntimeConfig { id: "codex", label: "Codex", dir: ".agents/skills", color: "green", auto_scan: true },
-    RuntimeConfig { id: "trae", label: "Trae", dir: ".trae-cn/skills", color: "blue", auto_scan: false },
-    RuntimeConfig { id: "workbuddy", label: "WorkBuddy", dir: ".workbuddy/skills", color: "violet", auto_scan: false },
+    RuntimeConfig {
+        id: "claude",
+        label: "Claude",
+        dir: ".claude/skills",
+        color: "orange",
+        auto_scan: false,
+    },
+    RuntimeConfig {
+        id: "codex",
+        label: "Codex",
+        dir: ".agents/skills",
+        color: "green",
+        auto_scan: true,
+    },
+    RuntimeConfig {
+        id: "trae",
+        label: "Trae",
+        dir: ".trae-cn/skills",
+        color: "blue",
+        auto_scan: false,
+    },
+    RuntimeConfig {
+        id: "workbuddy",
+        label: "WorkBuddy",
+        dir: ".workbuddy/skills",
+        color: "violet",
+        auto_scan: false,
+    },
 ];
 
 pub struct RuntimeConfig {
@@ -54,17 +78,17 @@ fn migrate_legacy_database(db_path: &PathBuf) {
 }
 
 pub fn open() -> Connection {
-     let db_path = db_path();
-     migrate_legacy_database(&db_path);
-     std::fs::create_dir_all(db_path.parent().unwrap()).ok();
-     let conn = Connection::open(db_path).expect("failed to open db");
-     migrate(&conn);
-     conn
- }
+    let db_path = db_path();
+    migrate_legacy_database(&db_path);
+    std::fs::create_dir_all(db_path.parent().unwrap()).ok();
+    let conn = Connection::open(db_path).expect("failed to open db");
+    migrate(&conn);
+    conn
+}
 
- fn migrate(conn: &Connection) {
-     conn.execute_batch(
-         r#"
+fn migrate(conn: &Connection) {
+    conn.execute_batch(
+        r#"
         CREATE TABLE IF NOT EXISTS skills (
              id           TEXT PRIMARY KEY,
              name         TEXT NOT NULL,
@@ -220,9 +244,17 @@ pub fn open() -> Connection {
           created_at  TEXT NOT NULL,
           updated_at  TEXT NOT NULL
       );
+
+      -- 标签持久备份：独立于 skills 行存在，orphan cleanup 不会删除，
+      -- skill 行被删除重建后按 path 恢复，避免用户标签因重扫描丢失
+      CREATE TABLE IF NOT EXISTS skill_tag_backup (
+          path        TEXT PRIMARY KEY,
+          tags        TEXT NOT NULL,
+          updated_at  TEXT NOT NULL
+      );
        "#,
-   )
-   .expect("failed to migrate db");
+    )
+    .expect("failed to migrate db");
 
     // Migration: fix library_sources schema if created by older app version
     // Old schema had INTEGER id + no sort_order/updated_at columns
@@ -253,49 +285,53 @@ pub fn open() -> Connection {
                     updated_at  TEXT NOT NULL
                 )",
                 [],
-            ).ok();
+            )
+            .ok();
         }
     }
 
-   // Migration: codex 从 auto-scan 源目录改为独立 symlink 目录
-   // Note: seed 已修正为 .codex/skills，此迁移仅兼容旧版数据库
-   conn.execute(
+    // Migration: codex 从 auto-scan 源目录改为独立 symlink 目录
+    // Note: seed 已修正为 .codex/skills，此迁移仅兼容旧版数据库
+    conn.execute(
        "UPDATE agents SET skills_dir = '.codex/skills', auto_scan = 0 WHERE id = 'codex' AND skills_dir = '.agents/skills'",
        [],
    ).ok();
 
-   // Migration: 添加 scan_agents_dir 列
-   {
-       let cols: Vec<String> = conn
-           .prepare("PRAGMA table_info(agents)")
-           .ok()
-           .map(|mut s| {
-               s.query_map([], |r| r.get::<_, String>(1))
-                   .ok()
-                   .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                   .unwrap_or_default()
-           })
-           .unwrap_or_default();
-       if !cols.iter().any(|c| c == "scan_agents_dir") {
-           conn.execute(
-               "ALTER TABLE agents ADD COLUMN scan_agents_dir INTEGER NOT NULL DEFAULT 0",
-               [],
-           ).ok();
-       }
-   }
+    // Migration: 添加 scan_agents_dir 列
+    {
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(agents)")
+            .ok()
+            .map(|mut s| {
+                s.query_map([], |r| r.get::<_, String>(1))
+                    .ok()
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        if !cols.iter().any(|c| c == "scan_agents_dir") {
+            conn.execute(
+                "ALTER TABLE agents ADD COLUMN scan_agents_dir INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .ok();
+        }
+    }
 
-   // Migration: 已知会扫描 .agents/skills 的 agent 默认开启
-   conn.execute(
+    // Migration: 已知会扫描 .agents/skills 的 agent 默认开启
+    conn.execute(
        "UPDATE agents SET scan_agents_dir = 1 WHERE id IN ('codex', 'cursor', 'opencode') AND scan_agents_dir = 0",
        [],
    ).ok();
 
-   // Migration: skill id 前缀 codex: -> main: (库源模式后 source 是 library_sources)
+    // Migration: skill id 前缀 codex: -> main: (库源模式后 source 是 library_sources)
     {
-        let renamed = conn.execute(
-            "UPDATE skills SET id = 'main:' || substr(id, 7) WHERE id LIKE 'codex:%'",
-            [],
-        ).unwrap_or(0);
+        let renamed = conn
+            .execute(
+                "UPDATE skills SET id = 'main:' || substr(id, 7) WHERE id LIKE 'codex:%'",
+                [],
+            )
+            .unwrap_or(0);
         if renamed > 0 {
             conn.execute(
                 "UPDATE connections SET skill_id = 'main:' || substr(skill_id, 7) WHERE skill_id LIKE 'codex:%'",
@@ -308,23 +344,6 @@ pub fn open() -> Connection {
         }
     }
 
-    // Preserve legacy library paths while new installs default to .skilldeck/skills.
-    {
-        let home = dirs::home_dir().unwrap_or_default();
-        let old_abs = home.join(".agents/skills").to_string_lossy().to_string();
-        conn.execute(
-            "UPDATE library_sources SET path = '.ai-hub/skills'
-             WHERE path IN ('.agents/skills', ?1)",
-            params![&old_abs],
-        ).ok();
-
-        let new_prefix = home.join(".ai-hub/skills").to_string_lossy().to_string();
-        conn.execute(
-            "UPDATE skills SET path = REPLACE(path, ?1, ?2) WHERE path LIKE ?3",
-            params![&old_abs, &new_prefix, format!("{}%", old_abs)],
-        ).ok();
-    }
-
     // Seed default library sources if table is empty
     {
         let count: i64 = conn
@@ -333,9 +352,37 @@ pub fn open() -> Connection {
         if count == 0 {
             conn.execute(
                 "INSERT INTO library_sources (id, name, path, enabled, sort_order, created_at, updated_at)
-                 VALUES ('main', '主库', '.skilldeck/skills', 1, 0, ?1, ?1)",
+                 VALUES ('main', '主库', '.skill-deck', 1, 0, ?1, ?1)",
                 params![now_iso()],
             ).ok();
+        }
+    }
+
+    // Keep existing default installs on the library root. Custom library paths are untouched.
+    {
+        let home = dirs::home_dir().unwrap_or_default();
+        let legacy_paths = [
+            ".skill-desk".to_string(),
+            "~/.skill-desk".to_string(),
+            home.join(".skill-desk").to_string_lossy().to_string(),
+            ".skill-desk/skills".to_string(),
+            "~/.skill-desk/skills".to_string(),
+            home.join(".skill-desk/skills")
+                .to_string_lossy()
+                .to_string(),
+            ".skill-deck/skills".to_string(),
+            "~/.skill-deck/skills".to_string(),
+            home.join(".skill-deck/skills")
+                .to_string_lossy()
+                .to_string(),
+        ];
+        for path in legacy_paths {
+            conn.execute(
+                "UPDATE library_sources SET path = '.skill-deck'
+                 WHERE path = ?1 AND (id = 'main' OR id = '主库' OR name = '主库')",
+                params![path],
+            )
+            .ok();
         }
     }
 
@@ -343,16 +390,60 @@ pub fn open() -> Connection {
     {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM agents", [], |r| r.get(0))
- .unwrap_or(0);
+            .unwrap_or(0);
         if count == 0 {
             let defaults = [
-               ("claude",    "Claude",    ".claude/skills",     ".claude",     ".claude.json",        "orange", 0, 0, 1, 0),
-               ("codex",     "Codex",     ".codex/skills",      ".codex",      "config.toml",         "green",  0, 1, 1, 1),
-               ("trae",      "Trae",      ".trae-cn/skills",    ".trae-cn",    "mcp.json",            "blue",   0, 0, 1, 2),
-               ("workbuddy", "WorkBuddy", ".workbuddy/skills",  ".workbuddy",  "mcp.json",            "violet", 0, 0, 1, 3),
-           ];
-           for (id, label, sdir, cdir, mcp, color, auto, scan_ag, en, ord) in defaults {
-               conn.execute(
+                (
+                    "claude",
+                    "Claude",
+                    ".claude/skills",
+                    ".claude",
+                    ".claude.json",
+                    "orange",
+                    0,
+                    0,
+                    1,
+                    0,
+                ),
+                (
+                    "codex",
+                    "Codex",
+                    ".codex/skills",
+                    ".codex",
+                    "config.toml",
+                    "green",
+                    0,
+                    1,
+                    1,
+                    1,
+                ),
+                (
+                    "trae",
+                    "Trae",
+                    ".trae-cn/skills",
+                    ".trae-cn",
+                    "mcp.json",
+                    "blue",
+                    0,
+                    0,
+                    1,
+                    2,
+                ),
+                (
+                    "workbuddy",
+                    "WorkBuddy",
+                    ".workbuddy/skills",
+                    ".workbuddy",
+                    "mcp.json",
+                    "violet",
+                    0,
+                    0,
+                    1,
+                    3,
+                ),
+            ];
+            for (id, label, sdir, cdir, mcp, color, auto, scan_ag, en, ord) in defaults {
+                conn.execute(
                    "INSERT INTO agents (id, label, skills_dir, config_dir, mcp_config_file, color, auto_scan, scan_agents_dir, enabled, sort_order, created_at, updated_at)
                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11)",
                    params![id, label, sdir, cdir, mcp, color, auto, scan_ag, en, ord, now_iso()],
@@ -381,16 +472,32 @@ pub fn open() -> Connection {
             .ok();
         }
         if !cols.iter().any(|c| c == "author") {
-            conn.execute("ALTER TABLE skills ADD COLUMN author TEXT NOT NULL DEFAULT ''", []).ok();
+            conn.execute(
+                "ALTER TABLE skills ADD COLUMN author TEXT NOT NULL DEFAULT ''",
+                [],
+            )
+            .ok();
         }
         if !cols.iter().any(|c| c == "license") {
-            conn.execute("ALTER TABLE skills ADD COLUMN license TEXT NOT NULL DEFAULT ''", []).ok();
+            conn.execute(
+                "ALTER TABLE skills ADD COLUMN license TEXT NOT NULL DEFAULT ''",
+                [],
+            )
+            .ok();
         }
         if !cols.iter().any(|c| c == "version") {
-            conn.execute("ALTER TABLE skills ADD COLUMN version TEXT NOT NULL DEFAULT ''", []).ok();
+            conn.execute(
+                "ALTER TABLE skills ADD COLUMN version TEXT NOT NULL DEFAULT ''",
+                [],
+            )
+            .ok();
         }
         if !cols.iter().any(|c| c == "permissions") {
-            conn.execute("ALTER TABLE skills ADD COLUMN permissions TEXT NOT NULL DEFAULT '[]'", []).ok();
+            conn.execute(
+                "ALTER TABLE skills ADD COLUMN permissions TEXT NOT NULL DEFAULT '[]'",
+                [],
+            )
+            .ok();
         }
     }
 
@@ -410,17 +517,17 @@ pub fn open() -> Connection {
     };
 
     if has_skill_names {
-       conn.execute("DROP TABLE presets", []).ok();
-       conn.execute(
-           "CREATE TABLE presets (
+        conn.execute("DROP TABLE presets", []).ok();
+        conn.execute(
+            "CREATE TABLE presets (
                id INTEGER PRIMARY KEY, name TEXT NOT NULL,
                skill_ids TEXT DEFAULT '[]', runtime TEXT DEFAULT 'claude',
                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
            )",
-           [],
-       )
-       .ok();
-   }
+            [],
+        )
+        .ok();
+    }
 
     // 库源已移除：旧 skill id 前缀 主库: → 改为 codex:（.agents/skills 即 codex 目录）
     conn.execute(
@@ -428,8 +535,60 @@ pub fn open() -> Connection {
         [],
     ).ok();
 
-  // Enable FK cascade for package tables (rusqlite needs pragma per connection)
-  conn.execute_batch("PRAGMA foreign_keys = ON;").ok();
+    // Enable FK cascade for package tables (rusqlite needs pragma per connection)
+    conn.execute_batch("PRAGMA foreign_keys = ON;").ok();
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+
+    #[test]
+    fn migrates_default_library_typos_without_touching_custom_sources() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE library_sources (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO library_sources VALUES ('主库', '主库', '.skill-desk', 1, 0, 'now', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO library_sources VALUES ('custom', 'Custom', '.custom-skills', 1, 1, 'now', 'now')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn);
+
+        let default_path: String = conn
+            .query_row(
+                "SELECT path FROM library_sources WHERE id = '主库'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let custom_path: String = conn
+            .query_row(
+                "SELECT path FROM library_sources WHERE id = 'custom'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(default_path, ".skill-deck");
+        assert_eq!(custom_path, ".custom-skills");
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -449,7 +608,7 @@ pub struct SkillRow {
     pub permissions: Vec<String>,
 }
 
- #[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ActivityLog {
     pub id: i64,
     pub action: String,
@@ -491,7 +650,6 @@ pub struct RuntimeInfo {
     pub sort_order: i64,
 }
 
-
 // ===================== Agent (运行环境注册表) =====================
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -501,11 +659,11 @@ pub struct AgentRow {
     pub skills_dir: String,
     pub config_dir: String,
     pub mcp_config_file: String,
-   pub color: String,
-   pub auto_scan: bool,
-   pub scan_agents_dir: bool,
-   pub enabled: bool,
-   pub sort_order: i64,
+    pub color: String,
+    pub auto_scan: bool,
+    pub scan_agents_dir: bool,
+    pub enabled: bool,
+    pub sort_order: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -524,7 +682,7 @@ pub struct ProjectRow {
 /// the hardcoded RUNTIMES if the agents table is somehow empty.
 pub fn db_agents(conn: &Connection) -> Vec<AgentRow> {
     let mut stmt = match conn.prepare(
-      "SELECT id, label, skills_dir, config_dir, mcp_config_file, color,
+        "SELECT id, label, skills_dir, config_dir, mcp_config_file, color,
               auto_scan, scan_agents_dir, enabled, sort_order
        FROM agents ORDER BY label COLLATE NOCASE",
     ) {
@@ -539,11 +697,11 @@ pub fn db_agents(conn: &Connection) -> Vec<AgentRow> {
             config_dir: row.get(3)?,
             mcp_config_file: row.get(4)?,
             color: row.get(5)?,
-           auto_scan: row.get::<_, i64>(6)? != 0,
-           scan_agents_dir: row.get::<_, i64>(7)? != 0,
-           enabled: row.get::<_, i64>(8)? != 0,
-           sort_order: row.get(9)?,
-       })
+            auto_scan: row.get::<_, i64>(6)? != 0,
+            scan_agents_dir: row.get::<_, i64>(7)? != 0,
+            enabled: row.get::<_, i64>(8)? != 0,
+            sort_order: row.get(9)?,
+        })
     });
     rows.ok()
         .map(|r| r.filter_map(|x| x.ok()).collect())
@@ -591,9 +749,11 @@ pub fn db_library_sources(conn: &Connection) -> Vec<LibrarySourceRow> {
 
 /// Read only enabled library sources from DB.
 pub fn db_enabled_library_sources(conn: &Connection) -> Vec<LibrarySourceRow> {
-    db_library_sources(conn).into_iter().filter(|s| s.enabled).collect()
+    db_library_sources(conn)
+        .into_iter()
+        .filter(|s| s.enabled)
+        .collect()
 }
-
 
 // ===================== Package (工具集 / AI 能力包) =====================
 
@@ -716,24 +876,24 @@ pub struct HookInput {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct PluginToggleInput {
-    pub name: String,       // "browser@openai-bundled"
+    pub name: String, // "browser@openai-bundled"
     pub marketplace: String,
     pub enabled: bool,
 }
 
 pub fn now_iso() -> String {
-     use std::time::{SystemTime, UNIX_EPOCH};
-     let secs = SystemTime::now()
-         .duration_since(UNIX_EPOCH)
-         .unwrap()
-         .as_secs();
-     format!("{}", secs)
- }
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    format!("{}", secs)
+}
 
- pub fn log_activity(conn: &Connection, action: &str, detail: &str) {
-     conn.execute(
-         "INSERT INTO activity_log (action, detail, created_at) VALUES (?1, ?2, ?3)",
-         params![action, detail, now_iso()],
-     )
-     .ok();
- }
+pub fn log_activity(conn: &Connection, action: &str, detail: &str) {
+    conn.execute(
+        "INSERT INTO activity_log (action, detail, created_at) VALUES (?1, ?2, ?3)",
+        params![action, detail, now_iso()],
+    )
+    .ok();
+}

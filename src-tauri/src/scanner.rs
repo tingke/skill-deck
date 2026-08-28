@@ -248,31 +248,82 @@ pub fn scan_runtime_dir(conn: &Connection, id_prefix: &str, label: &str, source_
     found_ids
 }
 
+fn library_skill_identifier(base: &Path, skill_dir: &Path) -> Option<String> {
+    let relative = skill_dir.strip_prefix(base).ok()?;
+    let components: Vec<String> = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect();
+
+    // The old default library was <home>/.skill-deck/skills. Preserve its flat IDs
+    // when that exact directory becomes a child of the new library root.
+    if components.len() == 2 && components[0] == "skills" {
+        return Some(components[1].clone());
+    }
+
+    Some(components.join("/"))
+}
+
+fn has_skill_manifest(dir: &Path) -> bool {
+    dir.join("SKILL.md").exists() || dir.join("SKILL.md.disabled").exists()
+}
+
+fn visit_library_dir(
+    dir: &Path,
+    symlink_targets: &mut std::collections::HashSet<PathBuf>,
+    paths: &mut Vec<PathBuf>,
+) {
+    // Follow linked skill trees, but remember their canonical targets to prevent cycles.
+    // Real directories do not need canonicalization on every recursion.
+    if dir.is_symlink() {
+        let canonical = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        if !symlink_targets.insert(canonical) {
+            return;
+        }
+    }
+
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    let mut children: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
+    children.sort_by_key(|path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+    });
+
+    for path in children {
+        if !path.is_dir() {
+            continue;
+        }
+        // Treat a directory containing a manifest as a complete skill and do not
+        // descend into its dependencies or bundled assets (for example node_modules).
+        if has_skill_manifest(&path) {
+            paths.push(path);
+            continue;
+        }
+        visit_library_dir(&path, symlink_targets, paths);
+    }
+}
+
 /// 扫描库源目录下所有 skill，写入数据库。
 /// id_prefix = library source id（如 "1"），label = 库源显示名（如 "主库"）。
-/// skill id = <lib_id>:<dir_name>，source_lib = label。
+/// skill id = <lib_id>:<relative_dir>；顶层 skill 保持旧版 <lib_id>:<dir_name>。
 /// 库源中的 symlink 是合法的 skill 入口（指向真实目录），需要跟随。
 pub fn scan_library_source(conn: &Connection, id_prefix: &str, label: &str, source_path: &str) -> Vec<String> {
     let base = PathBuf::from(source_path);
     let mut found_ids = Vec::new();
+    let mut paths = Vec::new();
+    let mut symlink_targets = std::collections::HashSet::new();
+    visit_library_dir(&base, &mut symlink_targets, &mut paths);
 
-    let entries = match fs::read_dir(&base) {
-        Ok(e) => e,
-        Err(_) => return found_ids,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        // is_dir() 跟随 symlink：symlink 指向目录时返回 true
-        if !path.is_dir() {
-            continue;
-        }
-        let dir_name = path.file_name().unwrap().to_string_lossy().to_string();
-        if dir_name.starts_with('.') {
-            continue;
-        }
-
+    for path in paths {
         if let Some(scan) = scan_skill_dir(&path, label) {
+            let identifier = library_skill_identifier(&base, &path)
+                .unwrap_or_else(|| scan.original_dir.clone());
+            let mut scan = scan;
+            scan.original_dir = identifier;
             let id = format!("{}:{}", id_prefix, scan.original_dir);
             found_ids.push(id.clone());
             conn.execute(
@@ -311,6 +362,85 @@ pub fn scan_library_source(conn: &Connection, id_prefix: &str, label: &str, sour
     }
 
     found_ids
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    struct TempDir(PathBuf);
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn scan_library_source_finds_nested_and_hidden_skills() {
+        let root = TempDir(std::env::temp_dir().join(format!(
+            "skill-deck-scanner-{}",
+            Uuid::new_v4()
+        )));
+        let legacy = root.0.join("skills/foo");
+        let hidden = root.0.join(".agents/skills/foo");
+        let nested = root.0.join("packages/deep/bar");
+        for dir in [&legacy, &hidden, &nested] {
+            fs::create_dir_all(dir).unwrap();
+            fs::write(
+                dir.join("SKILL.md"),
+                "---\nname: Test Skill\ndescription: nested\n---\nbody\n",
+            )
+            .unwrap();
+        }
+        let bundled = legacy.join("project/node_modules/dependency");
+        fs::create_dir_all(&bundled).unwrap();
+        fs::write(bundled.join("SKILL.md"), "---\nname: Bundled\n---\n").unwrap();
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE skills (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                source_lib TEXT NOT NULL,
+                path TEXT NOT NULL,
+                description TEXT,
+                tags TEXT DEFAULT '[]',
+                content_hash TEXT,
+                enabled INTEGER DEFAULT 1,
+                author TEXT DEFAULT '',
+                license TEXT DEFAULT '',
+                version TEXT DEFAULT '',
+                permissions TEXT DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+
+        let found = scan_library_source(&conn, "main", "主库", &root.0.to_string_lossy());
+        let expected: Vec<String> = vec![
+            "main:.agents/skills/foo".into(),
+            "main:packages/deep/bar".into(),
+            "main:foo".into(),
+        ];
+        assert_eq!(found, expected);
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM skills", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 3);
+        let hidden_path: String = conn
+            .query_row(
+                "SELECT path FROM skills WHERE id = 'main:.agents/skills/foo'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(hidden_path, hidden.to_string_lossy().to_string());
+    }
 }
 
 /// 从数据库读取所有 skill 及其连接状态
