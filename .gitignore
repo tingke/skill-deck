@@ -3,5 +3,10 @@ src-tauri/target/
 *.log
 .DS_Store
 docs/*
+!docs/project.md
+!docs/tech-stack.md
+!docs/code-style.md
+!docs/testing.md
+!docs/workflow.md
 node_modules
 .claude/
