@@ -16,6 +16,7 @@ try {
       fileURLToPath(new URL("../tests/skill-delete-confirmation.test.ts", import.meta.url)),
       fileURLToPath(new URL("../tests/skill-batch.test.ts", import.meta.url)),
       fileURLToPath(new URL("../tests/skill-paths.test.ts", import.meta.url)),
+      fileURLToPath(new URL("../tests/agent-activity-notifications.test.ts", import.meta.url)),
     ],
     bundle: true,
     platform: "node",

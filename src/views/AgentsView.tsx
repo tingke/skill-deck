@@ -17,6 +17,7 @@ import {
 import type { AgentRow } from "../types";
 import { useDeleteConfirmation } from "../lib/deleteConfirmation";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
+import DetailDrawer from "../components/DetailDrawer";
 import { AgentGlyph } from "../components/AgentGlyph";
 
 const toast = () => useToastStore.getState();
@@ -42,7 +43,9 @@ export default function AgentsView() {
   const extensions = useAppStore((s) => s.extensions);
   const [editing, setEditing] = useState<AgentRow | null>(null);
   const [creating, setCreating] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const deleteConfirmation = useDeleteConfirmation();
+  const detailAgent = detailId ? agents.find((a) => a.id === detailId) ?? null : null;
 
   const handleToggle = async (agent: AgentRow) => {
     try {
@@ -64,6 +67,11 @@ export default function AgentsView() {
     } catch (e) {
       toast().show(t("common.deleteFailed", { msg: String(e) }), "error");
     }
+  };
+
+  const handleDeleteFromDetail = async (agent: AgentRow) => {
+    await handleDelete(agent);
+    setDetailId(null);
   };
 
   const countSkills = (agentId: string) =>
@@ -90,13 +98,13 @@ export default function AgentsView() {
         <div className="grid grid-cols-2 gap-3">
           {agents.map((a) => {
             const c = colorOf(a.color);
-            const isBuiltin = a.id === "claude" || a.id === "codex";
             return (
               <div
                 key={a.id}
+                onClick={() => setDetailId(a.id)}
                 className={`card p-4 flex flex-col ${
                   a.enabled ? "" : "opacity-60"
-                }`}
+                } cursor-pointer`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
@@ -115,28 +123,15 @@ export default function AgentsView() {
                   </div>
                   <div className="flex items-center gap-0.5 shrink-0">
                     <button
-                      onClick={() => handleToggle(a)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggle(a);
+                      }}
                       title={a.enabled ? t("agents.enableHint") : t("agents.disableHint")}
                       className={`p-1 ${a.enabled ? "text-emerald-500" : "text-faint"}`}
                     >
                       {a.enabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
                     </button>
-                    <button
-                      onClick={() => setEditing(a)}
-                      title={t("common.edit")}
-                      className="btn-icon"
-                    >
-                      <Edit3 size={14} />
-                    </button>
-                    {!isBuiltin && (
-                      <button
-                        onClick={() => deleteConfirmation.request(a.label, () => handleDelete(a))}
-                        title={t("common.delete")}
-                        className="btn-icon btn-icon-danger"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
                   </div>
                 </div>
 
@@ -200,6 +195,124 @@ export default function AgentsView() {
       )}
 
       <DeleteConfirmDialog controller={deleteConfirmation} testId="delete-agent-dialog" />
+
+      <DetailDrawer
+        open={!!detailAgent}
+        onClose={() => setDetailId(null)}
+        testId="agent-detail-drawer"
+        icon={
+          detailAgent ? (
+            <AgentGlyph id={detailAgent.id} label={detailAgent.label} size={30} active={detailAgent.enabled} />
+          ) : undefined
+        }
+        title={detailAgent?.label ?? ""}
+        subtitle={
+          <span className="flex items-center gap-1.5 flex-wrap">
+            <span>{detailAgent?.id}</span>
+            <span className={detailAgent?.enabled ? "text-emerald-500" : ""}>
+              · {detailAgent?.enabled ? t("common.enabled") : t("common.disabled")}
+            </span>
+          </span>
+        }
+        actions={
+          detailAgent && (
+            <>
+              <button
+                onClick={() => handleToggle(detailAgent)}
+                className={detailAgent.enabled ? "btn btn-outline" : "btn btn-primary"}
+              >
+                {detailAgent.enabled ? t("agents.disableAction") : t("agents.enableAction")}
+              </button>
+              <button onClick={() => setEditing(detailAgent)} className="btn btn-primary ml-auto">
+                <Edit3 size={14} /> {t("common.edit")}
+              </button>
+              {detailAgent.id !== "claude" && detailAgent.id !== "codex" && (
+                <button
+                  onClick={() => deleteConfirmation.request(detailAgent.label, () => handleDeleteFromDetail(detailAgent))}
+                  className="btn btn-ghost text-red-500"
+                >
+                  <Trash2 size={14} /> {t("common.delete")}
+                </button>
+              )}
+            </>
+          )
+        }
+      >
+        {detailAgent && (
+          <>
+            {/* Paths */}
+            <section className="px-5 py-3.5 border-b border-border-subtle space-y-2">
+              <div className="flex items-center gap-1.5 mb-1">
+                <FolderTree size={12} className="text-faint" />
+                <span className="text-2xs font-semibold text-faint uppercase tracking-wider">{t("agents.detailPaths")}</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-faint w-20 shrink-0">{t("agents.detailSkillsDir")}</span>
+                <code className="font-mono text-muted truncate">~/{detailAgent.skills_dir}</code>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-faint w-20 shrink-0">{t("agents.detailConfigDir")}</span>
+                <code className="font-mono text-muted truncate">~/{detailAgent.config_dir}</code>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-faint w-20 shrink-0">{t("agents.detailMcpFile")}</span>
+                <code className="font-mono text-muted truncate">{detailAgent.mcp_config_file || t("common.none")}</code>
+              </div>
+            </section>
+
+            {/* Stats */}
+            <section className="px-5 py-3.5 border-b border-border-subtle">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Cpu size={12} className="text-faint" />
+                <span className="text-2xs font-semibold text-faint uppercase tracking-wider">{t("agents.detailStats")}</span>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  ["skills", countSkills(detailAgent.id)],
+                  ["mcp", countExt(detailAgent.id, "mcp")],
+                  ["plugins", countExt(detailAgent.id, "plugin")],
+                  ["hooks", countExt(detailAgent.id, "hook")],
+                ].map(([label, count]) => (
+                  <div key={String(label)} className="rounded-lg bg-surface-2 px-2 py-2 text-center">
+                    <div className={`text-sm font-semibold ${colorOf(detailAgent.color).text}`}>{count}</div>
+                    <div className="text-2xs text-faint">{label}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Scan options */}
+            <section className="px-5 py-3.5 border-b border-border-subtle space-y-2">
+              <span className="text-2xs font-semibold text-faint uppercase tracking-wider block">{t("agents.detailScanOptions")}</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className={`badge ${detailAgent.auto_scan ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-surface-2 text-faint"}`}>
+                  auto-scan
+                </span>
+                <span className={`badge ${detailAgent.scan_agents_dir ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-surface-2 text-faint"}`}>
+                  .agents/skills
+                </span>
+              </div>
+              <p className="text-2xs text-faint leading-relaxed">{t("agents.autoScanLabel")}</p>
+            </section>
+
+            {/* Meta */}
+            <section className="px-5 py-3.5 space-y-2">
+              <span className="text-2xs font-semibold text-faint uppercase tracking-wider block">{t("agents.detailInfo")}</span>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-faint w-20 shrink-0">{t("common.color")}</span>
+                <span className="flex items-center gap-1.5">
+                  <span className={`w-3 h-3 rounded-full ${colorOf(detailAgent.color).dot}`} />
+                  <span className="text-muted">{detailAgent.color}</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-faint w-20 shrink-0">{t("common.sortOrder")}</span>
+                <span className="text-muted font-mono">{detailAgent.sort_order}</span>
+              </div>
+            </section>
+          </>
+        )}
+      </DetailDrawer>
     </div>
   );
 }

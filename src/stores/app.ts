@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Skill, ViewKey, Prompt, Rule, AgentInfo, ActivityLog, PackageRow, ExtensionRow, LibrarySource, SkillConnectionState, SharedDisconnectConfirmation, SkillDeleteConfirmation } from "../types";
+import type { Skill, ViewKey, Prompt, Rule, AgentInfo, ActivityLog, PackageRow, ExtensionRow, LibrarySource, SkillConnectionState, SharedDisconnectConfirmation, SkillDeleteConfirmation, AgentActivitySnapshot } from "../types";
 import type { SkillFileEntry } from "../types";
 import type { AgentRow, ProjectRow } from "../types";
 import * as api from "../lib/tauri";
@@ -33,6 +33,7 @@ interface AppState {
   prompts: Prompt[];
   rules: Rule[];
   activity: ActivityLog[];
+  agentActivity: AgentActivitySnapshot;
   packages: PackageRow[];
   extensions: ExtensionRow[];
   agents: AgentRow[];
@@ -68,6 +69,7 @@ interface AppState {
   loadPrompts: () => Promise<void>;
   loadRules: () => Promise<void>;
   loadActivity: () => Promise<void>;
+  loadAgentActivity: () => Promise<void>;
   loadPackages: () => Promise<void>;
   loadExtensions: () => Promise<void>;
   loadAgents: () => Promise<void>;
@@ -98,6 +100,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   prompts: [],
   rules: [],
   activity: [],
+  agentActivity: { events: [], tasks: [] },
   packages: [],
   extensions: [],
   agents: [],
@@ -406,6 +409,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   loadActivity: async () => {
     try { set({ activity: await api.getRecentActivity() }); } catch { /* ignore */ }
+  },
+  loadAgentActivity: async () => {
+    try { set({ agentActivity: await api.getAgentActivitySnapshot() }); } catch { /* ignore */ }
   },
   loadPackages: async () => {
     try { set({ packages: await api.getPackages() }); } catch { /* ignore */ }

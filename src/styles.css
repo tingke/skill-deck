@@ -107,7 +107,6 @@
     --width-sidebar-expanded: 224px;
     --width-sidebar-collapsed: 64px;
     --width-left-drawer: 192px;
-    --width-right-drawer: 340px;
     --width-skill-name-min: 156px;
     --width-skill-name-flex: 28%;
     --width-skill-name-max: 320px;
@@ -119,7 +118,7 @@
     --width-skill-state: 52px;
     --width-skill-state-max: 90px;
     --width-search: 280px;
-    --offset-macos-traffic-lights: 76px;
+    --offset-macos-traffic-lights: 92px;
 
     /* ---- Motion ---- */
     --ease-fast: cubic-bezier(0.4, 0, 0.2, 1);
@@ -538,6 +537,22 @@ code, pre, kbd { font-family: var(--font-mono); }
    Skill Studio — filter drawer, center column + toggle switch
    ============================================================ */
 
+.agent-glyph {
+  background: linear-gradient(145deg, rgb(var(--c-surface)), rgb(var(--c-surface-2)));
+  border: 1px solid rgb(var(--c-border-subtle));
+  color: rgb(var(--c-muted));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.55),
+    0 1px 2px rgb(15 23 42 / 0.1);
+}
+
+.dark .agent-glyph {
+  background: linear-gradient(145deg, rgb(var(--c-surface-hover)), rgb(var(--c-surface-2)));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 1px 2px rgb(0 0 0 / 0.28);
+}
+
 .skill-layout {
   display: grid;
   grid-template-columns: var(--width-left-drawer) minmax(0, 1fr);
@@ -547,14 +562,6 @@ code, pre, kbd { font-family: var(--font-mono); }
 
 .skill-layout--left-closed {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.skills-right-drawer {
-  width: var(--width-right-drawer);
-  height: 100%;
-  min-height: 0;
-  flex-shrink: 0;
-  overflow: hidden;
 }
 
 .skills-left-drawer {
@@ -791,6 +798,79 @@ code, pre, kbd { font-family: var(--font-mono); }
   justify-content: flex-end;
   gap: var(--space-2);
   margin-top: var(--space-4);
+}
+
+/* ---- Right-side detail drawer (agents / presets / prompts cards) ---- */
+.detail-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-drawer);
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(var(--c-overlay) / 0.25);
+}
+
+.dark .detail-drawer-overlay {
+  background: rgb(0 0 0 / 0.45);
+}
+
+.detail-drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+  height: 100%;
+  min-height: 0;
+  border-left: 1px solid rgb(var(--c-border));
+  background: rgb(var(--c-surface));
+  box-shadow: var(--shadow-xl);
+  animation: detail-drawer-in var(--duration-normal) var(--ease-fast);
+}
+
+@keyframes detail-drawer-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.detail-drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  border-bottom: 1px solid rgb(var(--c-border-subtle));
+  flex-shrink: 0;
+}
+
+.detail-drawer-title {
+  margin: 0;
+  color: rgb(var(--c-heading));
+  font-size: var(--text-sm);
+  font-weight: 650;
+  line-height: var(--leading-tight);
+}
+
+.detail-drawer-subtitle {
+  margin-top: var(--space-1);
+  color: rgb(var(--c-faint));
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.detail-drawer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.detail-drawer-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid rgb(var(--c-border-subtle));
+  background: rgb(var(--c-surface));
+  flex-shrink: 0;
 }
 
 @keyframes toast-in {

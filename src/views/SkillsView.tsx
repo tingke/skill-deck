@@ -17,6 +17,7 @@ import { buildBatchSharedDisconnectConfirmation } from "../lib/connectionConfirm
 import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
 import { AgentGlyph } from "../components/AgentGlyph";
+import DetailDrawer from "../components/DetailDrawer";
 
 const ALL = "__all__";
 
@@ -346,7 +347,7 @@ function SkillDetail() {
   const t = useT();
   const {
     selectedSkillId, skills, agentOptions, skillConnections, skillContent, loadingContent,
-    requestSkillDelete, toggleSkillEnabled, skillFiles, librarySources, toggleConnect, adoptRealEntry,
+    skillFiles, librarySources, toggleConnect, adoptRealEntry,
   } = useAppStore();
   const [descExpanded, setDescExpanded] = useState(false);
   const [adoptionAgentId, setAdoptionAgentId] = useState<string | null>(null);
@@ -368,53 +369,11 @@ function SkillDetail() {
   }, []);
 
   if (!skill) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-faint border-l border-border">
-        <Folder size={36} className="opacity-30" />
-        <p className="text-xs mt-3">选中一个 skill 查看详情</p>
-      </div>
-    );
+    return null;
   }
 
   return (
-    <div className="flex flex-col h-full border-l border-border bg-surface overflow-hidden">
-      {/* header */}
-      <div className="px-5 pt-4 pb-3 border-b border-border-subtle shrink-0">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-bold text-heading truncate">{skill.name}</h3>
-            </div>
-            {/* file path — clickable to reveal in Finder */}
-            <button
-              onClick={() => revealInFinder(skill.path)}
-              className="mt-1 flex items-center gap-1 text-2xs text-faint hover:text-violet-500 transition-colors group max-w-full"
-              title="在 Finder 中显示"
-            >
-              <FolderOpen size={11} className="shrink-0" />
-              <span className="truncate font-mono">{skill.path}</span>
-              <ExternalLink size={10} className="shrink-0 opacity-0 group-hover:opacity-100" />
-            </button>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => toggleSkillEnabled(skill.id, !skill.enabled)}
-              className={skill.enabled ? "btn btn-ghost btn-sm text-emerald-500" : "btn btn-outline btn-sm text-faint"}
-              title={skill.enabled ? "停用" : "启用"}
-            >
-              <Power size={13} /> {skill.enabled ? "已启用" : "已停用"}
-            </button>
-            <button
-              onClick={() => requestSkillDelete({ id: skill.id, name: skill.name, path: skill.path })}
-              className="btn btn-ghost btn-sm text-red-500"
-              title={t("common.delete")}
-            >
-              <Trash2 size={13} />
-            </button>
-          </div>
-        </div>
-      </div>
-
+    <div className="bg-surface">
       <div className="flex-1 overflow-y-auto">
         {/* description — 3-line clamp, expandable */}
         {skill.description && (
@@ -616,11 +575,24 @@ function SkillDetail() {
 export default function SkillsView() {
   const [leftDrawerOpen] = useState(() => window.innerWidth >= 1000);
   const t = useT();
+  const [homeDirectory, setHomeDirectory] = useState("");
+  useEffect(() => {
+    let active = true;
+    getHomeDirectory()
+      .then((home) => {
+        if (active) setHomeDirectory(home);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
   const {
    skills, agentOptions, searchQuery, setSearchQuery,
    librarySources, selectedSkillId, selectSkill, toggleSkillEnabled,
-   requestBatchSharedDisconnect,
+   requestSkillDelete, requestBatchSharedDisconnect,
  } = useAppStore();
+ const selectedSkill = selectedSkillId ? skills.find((s) => s.id === selectedSkillId) ?? null : null;
 
   const [railFilter, setRailFilter] = useState<string>(ALL);
   const [multiSelect, setMultiSelect] = useState(false);
@@ -884,16 +856,54 @@ export default function SkillsView() {
         </div>
       </div>
 
+      {/* ===== Skill detail drawer (shared overlay) ===== */}
+      <DetailDrawer
+        open={!!selectedSkill}
+        onClose={() => selectSkill(null)}
+        testId="skill-detail-drawer"
+        icon={<FolderOpen size={18} className="text-faint shrink-0" />}
+        title={selectedSkill?.name ?? ""}
+        subtitle={
+          selectedSkill && (
+            <button
+              onClick={() => revealInFinder(selectedSkill.path)}
+              className="flex items-center gap-1 max-w-full hover:text-violet-500 transition-colors group"
+              title="在 Finder 中显示"
+            >
+              <span className="truncate">{formatSkillPath(selectedSkill.path, homeDirectory)}</span>
+              <ExternalLink size={10} className="shrink-0 opacity-0 group-hover:opacity-100" />
+            </button>
+          )
+        }
+        actions={
+          selectedSkill && (
+            <>
+              <button
+                onClick={() => toggleSkillEnabled(selectedSkill.id, !selectedSkill.enabled)}
+                className={selectedSkill.enabled ? "btn btn-outline text-emerald-500" : "btn btn-primary"}
+              >
+                <Power size={14} />
+                {selectedSkill.enabled ? "已启用" : "已停用"}
+              </button>
+              <button
+                onClick={() =>
+                  requestSkillDelete({
+                    id: selectedSkill.id,
+                    name: selectedSkill.name,
+                    path: selectedSkill.path,
+                  })
+                }
+                className="btn btn-ghost text-red-500 ml-auto"
+              >
+                <Trash2 size={14} /> {t("common.delete")}
+              </button>
+            </>
+          )
+        }
+      >
+        <SkillDetail />
+      </DetailDrawer>
+
     </div>
-  );
-}
-
-export function SkillsRightDrawer({ open }: { open: boolean }) {
-  if (!open) return null;
-
-  return (
-    <aside data-testid="skills-right-drawer" className="skills-right-drawer">
-      <SkillDetail />
-    </aside>
   );
 }

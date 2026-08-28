@@ -46,21 +46,23 @@ export function AgentGlyph({
 }) {
   const icon = BRAND_ICONS[id];
   const initial = label.trim().charAt(0).toUpperCase() || "?";
+  const iconSize = icon?.image ? Math.round(size * 0.82) : Math.round(size * 0.64);
 
   return (
     <span
       title={label}
-      className={`inline-flex shrink-0 items-center justify-center ${className ?? ""}`}
+      className={`agent-glyph inline-flex shrink-0 items-center justify-center ${className ?? ""}`}
       style={{
         width: size,
         height: size,
+        borderRadius: Math.max(4, Math.round(size * 0.28)),
         opacity: active ? 1 : 0.32,
       }}
     >
       {icon?.image ? (
-        <img src={icon.image} alt="" width={size} height={size} className="block" />
+        <img src={icon.image} alt="" width={iconSize} height={iconSize} className="block" />
       ) : icon?.path ? (
-        <svg viewBox="0 0 24 24" width={size} height={size} role="img" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width={iconSize} height={iconSize} role="img" aria-hidden="true">
           <path
             d={icon.path}
             fill={icon.themeAware ? undefined : icon.color}
@@ -68,7 +70,7 @@ export function AgentGlyph({
           />
         </svg>
       ) : (
-        <span className="flex h-full w-full items-center justify-center rounded-md bg-slate-500/15 text-2xs font-bold text-muted">
+        <span className="font-bold" style={{ fontSize: Math.round(size * 0.44) }}>
           {initial}
         </span>
       )}

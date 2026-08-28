@@ -17,6 +17,11 @@ assert.equal(mainWindow.decorations, true, "macOS overlay controls require decor
 assert.equal(mainWindow.titleBarStyle, "Overlay", "main window must use the macOS overlay title bar");
 assert.equal(mainWindow.hiddenTitle, true, "main window must not draw a separate title strip");
 assert.ok(
+  mainWindow.trafficLightPosition &&
+    typeof mainWindow.trafficLightPosition.y === "number",
+  "the macOS traffic lights must be positioned to stay vertically centered in the workspace toolbar",
+);
+assert.ok(
   capabilities.windows.includes("main") &&
     capabilities.permissions.includes("core:window:allow-start-dragging"),
   "the overlay drag region must be allowed to invoke start_dragging",
@@ -35,7 +40,7 @@ assert.match(
 assert.match(app, /data-testid="left-drawer-toggle"/, "left drawer control must live in the workspace toolbar");
 assert.match(app, /data-testid="global-scan-toggle"/, "global scanning must live in the workspace toolbar");
 assert.match(app, /data-testid="theme-toggle"/, "theme quick switch must live in the workspace toolbar");
-assert.match(app, /data-testid="right-drawer-toggle"/, "right drawer control must live in the workspace toolbar");
+assert.doesNotMatch(app, /right-drawer-toggle/, "the workspace toolbar must not render a right drawer toggle");
 
 const toolbarSource = app.slice(
   app.indexOf('data-testid="workspace-toolbar"'),
@@ -45,9 +50,8 @@ assert.ok(toolbarSource.includes('data-testid="left-drawer-toggle"'), "left draw
 assert.ok(
   toolbarSource.indexOf('data-testid="global-scan-toggle"') >= 0 &&
   toolbarSource.indexOf('data-testid="global-scan-toggle"') < toolbarSource.indexOf("<ThemeSwitcher") &&
-  toolbarSource.indexOf("<ThemeSwitcher") >= 0 &&
-  toolbarSource.indexOf("<ThemeSwitcher") < toolbarSource.indexOf('data-testid="right-drawer-toggle"'),
-  "global scanning must immediately precede the theme switch, followed by the right drawer control",
+  toolbarSource.indexOf("<ThemeSwitcher") >= 0,
+  "global scanning must immediately precede the theme switch",
 );
 
 const scanableViews = [
@@ -89,18 +93,15 @@ assert.doesNotMatch(skills, /confirmDelete/, "skill deletion must not use local 
 assert.match(appStore, /skillDeleteConfirmation/, "skill deletion must use explicit pending confirmation state");
 assert.match(app, /<SkillDeleteDialog/, "skill deletion must render an in-app confirmation dialog");
 assert.match(skillDeleteDialog, /data-testid="skill-delete-dialog"/, "skill deletion confirmation must expose a dialog test id");
-assert.match(skills, /data-testid="skills-right-drawer"/, "Skills right drawer must expose a test id");
+assert.match(skills, /testId="skill-detail-drawer"/, "Skills detail drawer must expose a test id");
 assert.match(skills, /data-left-open/, "Skills left drawer state must be explicit");
 assert.equal(skills.match(/<SkillDetail\s*\/>/g)?.length, 1, "Skill detail must render exactly once");
 assert.ok(
-  skills.indexOf("<SkillDetail />") > skills.indexOf('data-testid="skills-right-drawer"'),
-  "Skill detail must render inside the right drawer",
+  skills.indexOf("<SkillDetail />") > skills.indexOf('testId="skill-detail-drawer"'),
+  "Skill detail must render inside the shared detail drawer",
 );
-assert.match(
-  app,
-  /selectedSkillId[\s\S]*setRightDrawerOpen\(true\)/,
-  "selecting a skill must open the right detail drawer",
-);
+assert.match(skills, /open=\{!!selectedSkill\}/, "selecting a skill must open the detail drawer");
+assert.match(skills, /onClose=\{\(\) => selectSkill\(null\)\}/, "closing the detail drawer must clear the selected skill");
 assert.match(
   skills,
   /data-testid="connection-path-button"[\s\S]*revealInFinder\(connection\.entry_path\)/,
@@ -134,17 +135,10 @@ assert.doesNotMatch(
   /\.app-sidebar-nav-top\s*\{[^}]*border-bottom/,
   "the sidebar brand row must not have a bottom divider",
 );
-assert.match(app, /import SkillsView, \{ SkillsRightDrawer \} from "\.\/views\/SkillsView";/, "the app must own the workspace-level right drawer");
-assert.ok(
-  app.indexOf("</main>") < app.indexOf("<SkillsRightDrawer"),
-  "the Skills right drawer must be a sibling after main.app-main",
-);
-assert.doesNotMatch(app, /<SkillsView[^>]*rightDrawerOpen/, "SkillsView must not receive workspace right-drawer layout state");
-const skillsMainSource = skills.slice(
-  skills.indexOf("export default function SkillsView"),
-  skills.indexOf("export function SkillsRightDrawer"),
-);
-assert.doesNotMatch(skillsMainSource, /skills-right-drawer/, "the Skills right drawer must not render inside main.app-main");
+assert.match(app, /import SkillsView from "\.\/views\/SkillsView";/, "SkillsView must be mounted by the app shell");
+assert.doesNotMatch(app, /SkillsRightDrawer/, "the inline Skills right drawer must be removed");
+assert.doesNotMatch(app, /rightDrawerOpen/, "the app must not own skill drawer layout state");
+assert.match(skills, /import DetailDrawer from "\.\.\/components\/DetailDrawer";/, "SkillsView must use the shared detail drawer");
 assert.match(styles, /\.app-shell\s*\{[^}]*flex-direction:\s*column/, "the full-width workspace toolbar must sit above the drawer body");
 assert.match(styles, /\.workspace-body\s*\{[^}]*display:\s*flex/, "the sidebar and central workspace must share the area below the toolbar");
 assert.match(styles, /\.workspace-toolbar\s*\{[^}]*width:\s*100%/, "workspace toolbar must occupy the full workspace width");
@@ -153,7 +147,7 @@ assert.match(
   /\.workspace-toolbar\s*\{[^}]*padding-left:\s*var\(--offset-macos-traffic-lights\)/,
   "the full-width toolbar must reserve space for macOS traffic lights",
 );
-assert.match(styles, /\.skills-right-drawer\s*\{[^}]*height:\s*100%/, "Skills right drawer must occupy the full workspace height");
+assert.match(styles, /\.detail-drawer\s*\{[^}]*height:\s*100%/, "the shared detail drawer must occupy the full workspace height");
 assert.match(
   styles,
   /\.skill-layout\s*\{[^}]*grid-template-columns:\s*var\(--width-left-drawer\) minmax\(0, 1fr\)/,

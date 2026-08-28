@@ -172,6 +172,15 @@ export const togglePlugin = (input: PluginToggleInput) =>
 export const deleteExt = (id: string) =>
   invoke("delete_ext", { id });
 
+export const getHookObserverStatus = () =>
+  invoke<import("../types").HookObserverStatus[]>("get_hook_observer_status");
+
+export const setHookObserverEnabled = (agent: string, enabled: boolean) =>
+  invoke<import("../types").HookObserverStatus>("set_hook_observer_enabled", { agent, enabled });
+
+export const getAgentActivitySnapshot = () =>
+  invoke<import("../types").AgentActivitySnapshot>("get_agent_activity_snapshot");
+
 
 // ===================== Finder / 路径 =====================
 

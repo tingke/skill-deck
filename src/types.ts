@@ -243,6 +243,9 @@ export interface PluginToggleInput {
 }
 
 export const HOOK_EVENTS = [
+  "SessionStart",
+  "ProgressUpdate",
+  "TaskProgress",
   "UserPromptSubmit",
   "PreToolUse",
   "PostToolUse",
@@ -254,6 +257,51 @@ export const HOOK_EVENTS = [
   "SubagentStop",
   "TeammateIdle",
 ];
+
+export interface HookObserverStatus {
+  agent: string;
+  installed: boolean;
+  configExists: boolean;
+  configPath: string;
+}
+
+export interface AgentActivityEvent {
+  id: string;
+  agent: string;
+  sessionId: string;
+  event: string;
+  state: "working" | "waiting" | "failed" | "done" | string;
+  project: string;
+  taskId: string | null;
+  taskTitle: string | null;
+  taskStatus: string | null;
+  taskProgress: number | null;
+  step: string | null;
+  toolName: string | null;
+  activity: string | null;
+  timestamp: number;
+}
+
+export interface TaskProgress {
+  projectPath: string;
+  projectName: string;
+  taskId: string;
+  title: string;
+  status: string;
+  progress: number | null;
+  step: string | null;
+  updatedAt: number;
+  activeAgent: string | null;
+  lastEvent: string | null;
+  lastTool: string | null;
+  lastActivity: string | null;
+  lastActivityAt: number | null;
+}
+
+export interface AgentActivitySnapshot {
+  events: AgentActivityEvent[];
+  tasks: TaskProgress[];
+}
 
 // ===================== Settings =====================
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAppStore } from "./stores/app";
 import DashboardView from "./views/DashboardView";
-import SkillsView, { SkillsRightDrawer } from "./views/SkillsView";
+import SkillsView from "./views/SkillsView";
 import PackagesView from "./views/PackagesView";
 import MCPView from "./views/MCPView";
 import PluginsView from "./views/PluginsView";
@@ -13,9 +13,10 @@ import AgentsView from "./views/AgentsView";
 import ProjectsView from "./views/ProjectsView";
 import DesignSystemView from "./views/DesignSystemView";
 import ToastContainer from "./components/Toast";
+import AgentActivityNotifier from "./components/AgentActivityNotifier";
 import ConnectionConfirmationDialog from "./components/ConnectionConfirmationDialog";
 import SkillDeleteDialog from "./components/SkillDeleteDialog";
-import { LayoutDashboard, FileText, Settings as SettingsIcon, BookOpen, Plug, Layers, Webhook, Server, Sun, Moon, Monitor, FolderKanban, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, RefreshCw } from "lucide-react";
+import { LayoutDashboard, FileText, Settings as SettingsIcon, BookOpen, Plug, Layers, Webhook, Server, Sun, Moon, Monitor, FolderKanban, PanelLeftClose, PanelLeftOpen, RefreshCw } from "lucide-react";
 import { Cpu } from "lucide-react";
 import logoUrl from "./assets/logo.png";
 import type { ViewKey } from "./types";
@@ -27,7 +28,6 @@ export default function App() {
   const setTheme = useAppStore((s) => s.setTheme);
   const globalScan = useAppStore((s) => s.globalScan);
   const globalScanning = useAppStore((s) => s.globalScanning);
-  const selectedSkillId = useAppStore((s) => s.selectedSkillId);
   const connectionConfirmation = useAppStore((s) => s.connectionConfirmation);
   const connectionConfirming = useAppStore((s) => s.connectionConfirming);
   const cancelSharedDisconnect = useAppStore((s) => s.cancelSharedDisconnect);
@@ -37,7 +37,31 @@ export default function App() {
   const cancelSkillDelete = useAppStore((s) => s.cancelSkillDelete);
   const confirmSkillDelete = useAppStore((s) => s.confirmSkillDelete);
   const [navExpanded, setNavExpanded] = useState(() => window.innerWidth >= 1100);
-  const [rightDrawerOpen, setRightDrawerOpen] = useState(() => window.innerWidth >= 1200);
+
+  useEffect(() => {
+    // WKWebView can enable sentence capitalization and text correction for text fields.
+    // Disable both when a field receives focus so technical names/paths stay as typed.
+    const disableAutomaticTextTransforms = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+
+      target.autocapitalize = "none";
+      target.setAttribute("autocorrect", "off");
+      target.spellcheck = false;
+    };
+
+    document.addEventListener("focusin", disableAutomaticTextTransforms, true);
+    return () => document.removeEventListener("focusin", disableAutomaticTextTransforms, true);
+  }, []);
+
+  useEffect(() => {
+    const disableDefaultContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+    };
+
+    document.addEventListener("contextmenu", disableDefaultContextMenu);
+    return () => document.removeEventListener("contextmenu", disableDefaultContextMenu);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -75,10 +99,6 @@ export default function App() {
     }
   }, [theme]);
 
-  useEffect(() => {
-    if (selectedSkillId) setRightDrawerOpen(true);
-  }, [selectedSkillId]);
-
   const views: Record<ViewKey, React.ReactNode> = {
     dashboard: <DashboardView />,
     skills: <SkillsView />,
@@ -102,9 +122,7 @@ export default function App() {
         scanning={globalScanning}
         onScan={globalScan}
         navExpanded={navExpanded}
-        rightDrawerOpen={rightDrawerOpen}
         onToggleNav={() => setNavExpanded((expanded) => !expanded)}
-        onToggleRightDrawer={() => setRightDrawerOpen((open) => !open)}
       />
       <div className="workspace-body">
         <Sidebar
@@ -115,7 +133,6 @@ export default function App() {
         <main className="app-main">
           <div className="workspace-content">{views[view]}</div>
         </main>
-        {view === "skills" && <SkillsRightDrawer open={rightDrawerOpen} />}
       </div>
       <ConnectionConfirmationDialog
         confirmation={connectionConfirmation}
@@ -129,6 +146,7 @@ export default function App() {
         onCancel={cancelSkillDelete}
         onConfirm={confirmSkillDelete}
       />
+      <AgentActivityNotifier />
       <ToastContainer />
     </div>
   );
@@ -152,18 +170,14 @@ function WorkspaceToolbar({
   scanning,
   onScan,
   navExpanded,
-  rightDrawerOpen,
   onToggleNav,
-  onToggleRightDrawer,
 }: {
   theme: string;
   onThemeChange: (theme: "light" | "dark" | "system") => void;
   scanning: boolean;
   onScan: () => void;
   navExpanded: boolean;
-  rightDrawerOpen: boolean;
   onToggleNav: () => void;
-  onToggleRightDrawer: () => void;
 }) {
   const t = useT();
   return (
@@ -197,16 +211,6 @@ function WorkspaceToolbar({
           <RefreshCw size={14} className={scanning ? "animate-spin" : ""} />
         </button>
         <ThemeSwitcher theme={theme} onChange={onThemeChange} />
-        <button
-          data-testid="right-drawer-toggle"
-          onClick={onToggleRightDrawer}
-          className="btn-icon shrink-0"
-          title={rightDrawerOpen ? "收起右侧详情栏" : "展开右侧详情栏"}
-          aria-label={rightDrawerOpen ? "收起右侧详情栏" : "展开右侧详情栏"}
-          aria-expanded={rightDrawerOpen}
-        >
-          {rightDrawerOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
-        </button>
       </div>
     </header>
   );

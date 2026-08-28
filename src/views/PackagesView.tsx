@@ -41,6 +41,7 @@ import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
 import { useDeleteConfirmation } from "../lib/deleteConfirmation";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
+import DetailDrawer from "../components/DetailDrawer";
 import { AgentGlyph } from "../components/AgentGlyph";
 
 const toast = () => useToastStore.getState();
@@ -52,7 +53,10 @@ export default function PackagesView() {
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detailVersion, setDetailVersion] = useState(0);
   const deleteConfirmation = useDeleteConfirmation();
+  const detailPkg = detailId ? packages.find((p) => p.id === detailId) ?? null : null;
   const filtered = packages.filter(
     (p) =>
       p.name.toLowerCase().includes(query.toLowerCase()) ||
@@ -88,6 +92,7 @@ export default function PackagesView() {
   const handleDelete = async (id: string) => {
     await deletePkg(id);
     await loadPackages();
+    setDetailId(null);
     toast().show(t("packages.deleted"), "info");
   };
 
@@ -147,9 +152,8 @@ export default function PackagesView() {
                 t={t}
                 onApply={handleApply}
                 onApplyToProject={() => handleApplyToProject(p)}
-                onEdit={() => setEditingId(p.id)}
-                onDelete={() => deleteConfirmation.request(p.display_name || p.name, () => handleDelete(p.id))}
                 onExport={() => handleExport(p)}
+                onOpenDetail={() => setDetailId(p.id)}
               />
             ))}
           </div>
@@ -170,6 +174,7 @@ export default function PackagesView() {
           }}
           onDone={async () => {
             await loadPackages();
+            setDetailVersion((v) => v + 1);
             setCreating(false);
             setEditingId(null);
           }}
@@ -177,6 +182,15 @@ export default function PackagesView() {
       )}
 
       <DeleteConfirmDialog controller={deleteConfirmation} testId="delete-package-dialog" />
+
+      <PackageDetailDrawer
+        pkg={detailPkg}
+        t={t}
+        refreshKey={detailVersion}
+        onClose={() => setDetailId(null)}
+        onEdit={() => setEditingId(detailPkg!.id)}
+        onDelete={() => deleteConfirmation.request(detailPkg!.display_name || detailPkg!.name, () => handleDelete(detailPkg!.id))}
+      />
     </div>
   );
 }
@@ -187,23 +201,21 @@ function PackageCard({
   t,
   onApply,
   onApplyToProject,
-  onEdit,
-  onDelete,
   onExport,
+  onOpenDetail,
 }: {
   pkg: PackageRow;
   agentOptions: AgentInfo[];
   t: ReturnType<typeof useT>;
   onApply: (p: PackageRow, r: string) => void;
   onApplyToProject: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
   onExport: () => void;
+  onOpenDetail: () => void;
 }) {
   const [applyMenu, setApplyMenu] = useState(false);
   const title = pkg.display_name || pkg.name;
   return (
-    <div className="card p-4 flex flex-col">
+    <div onClick={onOpenDetail} className="card p-4 flex flex-col cursor-pointer">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-heading truncate">{title}</h3>
@@ -213,14 +225,6 @@ function PackageCard({
               <span className="text-[11px] text-muted truncate">{pkg.description}</span>
             )}
           </div>
-        </div>
-        <div className="flex items-center gap-0.5 shrink-0">
-          <button onClick={onEdit} title={t("common.edit")} className="btn-icon">
-            <Edit3 size={14} />
-          </button>
-          <button onClick={onDelete} title={t("common.delete")} className="btn-icon btn-icon-danger">
-            <Trash2 size={14} />
-          </button>
         </div>
       </div>
 
@@ -233,7 +237,10 @@ function PackageCard({
       <div className="flex items-center gap-1.5 mt-3">
         <div className="relative">
           <button
-            onClick={() => setApplyMenu((v) => !v)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setApplyMenu((v) => !v);
+            }}
             className="btn btn-primary btn-sm"
           >
             <Play size={12} /> {t("packages.applyTo")}
@@ -245,7 +252,8 @@ function PackageCard({
                 {agentOptions.map((rt) => (
                   <button
                     key={rt.id}
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       onApply(pkg, rt.id);
                       setApplyMenu(false);
                     }}
@@ -258,11 +266,12 @@ function PackageCard({
                  </button>
                ))}
                <div className="border-t border-border-subtle dark:border-border-strong my-0.5" />
-               <button
-                 onClick={() => {
-                   onApplyToProject();
-                   setApplyMenu(false);
-                 }}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onApplyToProject();
+                  setApplyMenu(false);
+                }}
                  className="w-full flex items-center gap-1.5 text-left px-2.5 py-1 text-xs text-muted hover:bg-surface-hover"
                >
                  <FolderOpen size={11} /> {t("packages.projectDir")}
@@ -271,11 +280,179 @@ function PackageCard({
             </>
           )}
         </div>
-        <button onClick={onExport} title="zip" className="btn btn-outline btn-sm">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onExport();
+          }}
+          title="zip"
+          className="btn btn-outline btn-sm"
+        >
           <Download size={12} />
         </button>
       </div>
     </div>
+  );
+}
+
+// ============ Detail Drawer ============
+
+function PackageDetailDrawer({
+  pkg,
+  t,
+  refreshKey,
+  onClose,
+  onEdit,
+  onDelete,
+}: {
+  pkg: PackageRow | null;
+  t: ReturnType<typeof useT>;
+  refreshKey: number;
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const [detail, setDetail] = useState<PackageDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!pkg) {
+      setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    getPackage(pkg.id)
+      .then((d) => {
+        if (!cancelled) setDetail(d);
+      })
+      .catch((e) => {
+        if (!cancelled) toast().show(t("packages.loadFailed", { msg: String(e) }), "error");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // t is a new reference every render; only reload when the target changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pkg?.id, refreshKey]);
+
+  return (
+    <DetailDrawer
+      open={!!pkg}
+      onClose={onClose}
+      testId="package-detail-drawer"
+      icon={<PackageIcon size={18} className="text-faint shrink-0" />}
+      title={pkg ? pkg.display_name || pkg.name : ""}
+      subtitle={
+        pkg && (
+          <span className="flex items-center gap-1.5 flex-wrap">
+            <span>v{pkg.version}</span>
+            <span>· {pkg.name}</span>
+          </span>
+        )
+      }
+      actions={
+        pkg && (
+          <>
+            <button onClick={onEdit} className="btn btn-primary ml-auto">
+              <Edit3 size={14} /> {t("common.edit")}
+            </button>
+            <button onClick={onDelete} className="btn btn-ghost text-red-500">
+              <Trash2 size={14} /> {t("common.delete")}
+            </button>
+          </>
+        )
+      }
+    >
+      {loading && <div className="p-10 text-center text-sm text-faint">{t("common.loading")}</div>}
+      {!loading && pkg && (
+        <>
+          {/* Description & meta */}
+          {(pkg.description || detail) && (
+            <section className="px-5 py-3.5 border-b border-border-subtle space-y-2">
+              {pkg.description && (
+                <p className="text-xs text-muted leading-relaxed">{pkg.description}</p>
+              )}
+              <div className="flex items-center gap-3 text-2xs text-faint flex-wrap">
+                <span className="flex items-center gap-1"><BookOpen size={11} /> {pkg.skill_count} skills</span>
+                <span className="flex items-center gap-1"><Server size={11} /> {pkg.mcp_count} mcp</span>
+                <span className="flex items-center gap-1"><FileText size={11} /> {pkg.config_count} configs</span>
+              </div>
+            </section>
+          )}
+
+          {/* Contents */}
+          {detail && (
+            <section className="px-5 py-3.5 space-y-3">
+              <span className="text-2xs font-semibold text-faint uppercase tracking-wider block">
+                {t("packages.detailContents")}
+              </span>
+
+              {detail.skills.length === 0 && detail.mcps.length === 0 && detail.configs.length === 0 && (
+                <p className="text-2xs text-faint">{t("packages.detailEmpty")}</p>
+              )}
+
+              {detail.skills.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <BookOpen size={12} className="text-faint" />
+                    <span className="text-2xs font-medium text-muted">{t("packages.tabSkills", { count: detail.skills.length })}</span>
+                  </div>
+                  <div className="space-y-1">
+                    {detail.skills.map((s) => (
+                      <div key={`${s.skill_id ?? s.name}-${s.position}`} className="flex items-center justify-between gap-2 text-xs rounded-md bg-surface-2 px-2 py-1.5">
+                        <span className="text-content truncate">{s.name}</span>
+                        {s.skill_id && <span className="text-2xs text-faint font-mono shrink-0">#{s.position + 1}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {detail.mcps.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <Server size={12} className="text-faint" />
+                    <span className="text-2xs font-medium text-muted">{t("packages.tabMcp", { count: detail.mcps.length })}</span>
+                  </div>
+                  <div className="space-y-1">
+                    {detail.mcps.map((m) => (
+                      <div key={`${m.name}-${m.position}`} className="flex items-center justify-between gap-2 text-xs rounded-md bg-surface-2 px-2 py-1.5">
+                        <span className="text-content truncate font-mono">{m.name}</span>
+                        <span className="text-2xs text-faint shrink-0">#{m.position + 1}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {detail.configs.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <FileText size={12} className="text-faint" />
+                    <span className="text-2xs font-medium text-muted">{t("packages.tabRules", { count: detail.configs.length })}</span>
+                  </div>
+                  <div className="space-y-1">
+                    {detail.configs.map((c, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 text-xs rounded-md bg-surface-2 px-2 py-1.5">
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <AgentGlyph id={c.agent} label={c.agent} size={16} />
+                          <span className="text-content truncate font-mono">~/{c.agent}/{c.file_name}</span>
+                        </span>
+                        <span className="text-2xs text-faint shrink-0">{c.category}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+        </>
+      )}
+    </DetailDrawer>
   );
 }
 

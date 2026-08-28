@@ -21,6 +21,7 @@ SkillDeck 是一个本地 AI Skill 管理器，用来集中管理 Skills、Promp
 - **冲突识别**：区分软链接、真实目录和真实文件，避免误删或覆盖已有入口。
 - **场景预设**：按场景维护 Skill 组合，一键切换当前 Agent 的能力挂载。
 - **能力资产管理**：管理 Prompts、Rules、MCP、Plugins、Hooks 和项目工具集。
+- **Agent 观察与任务进度**：一键为 Claude Code / Codex 安装观察 Hook，实时查看工具活动、当前任务、当前步骤和进度。
 - **本地数据**：数据和 SQLite 数据库保存在本机，不依赖云端服务。
 
 ## 技术栈
@@ -69,7 +70,37 @@ macOS 数据目录：
 主要文件：
 
 - `skilldeck.db`：SQLite 数据库
-- `~/.skilldeck/skills`：全新安装的默认主库源
+- `agent-events.jsonl`：Agent 观察 Hook 的事件日志（最多在界面中展示最近 500 条）
+- `~/.skill-deck`：全新安装的默认主库源，会递归扫描库源下的 Skills
+
+## Agent 观察与任务进度
+
+1. 进入「Hooks」页面，在「Agent 观察」中为 Claude Code 或 Codex 打开开关。
+2. 重启对应 Agent；Hook 会把会话、工具调用、当前项目与任务进度写入本地事件日志。
+3. 回到「概览」页面查看实时 Agent 活动与任务进度；任务进度、步骤或 Agent 状态变化会以客户端右下角 Toast 通知提醒。
+
+观察 Hook 是 fail-open 的纯观察者：Claude 写入 `~/.claude/settings.json`，Codex 写入 `~/.codex/hooks.json` 并启用 `features.hooks`；移除时只删除带 SkillDeck 标记的自有 Hook，不影响其他配置。
+
+任务进度不绑定特定工作流。Hook 事件可以直接携带嵌套 `task` 对象，也可以使用同名字段：
+
+```json
+{
+  "session_id": "agent-session",
+  "cwd": "/path/to/project",
+  "hook_event_name": "PostToolUse",
+  "task": {
+    "id": "login-feature",
+    "title": "登录功能",
+    "status": "in_progress",
+    "progress": 65,
+    "step": "修复登录回调"
+  },
+  "tool_name": "Bash",
+  "tool_input": { "command": "npm test" }
+}
+```
+
+`progress` 支持 `0-1` 比例或 `0-100` 百分比。未上报进度时仍会显示任务、状态、步骤和最近活动，进度显示为 `--`。
 
 已有 `ai-hub` 数据库会在首次启动 SkillDeck 时复制到新的数据目录，原文件保留不删。
 

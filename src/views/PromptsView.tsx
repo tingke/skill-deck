@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useAppStore } from "../stores/app";
 import { savePrompt, deletePrompt, saveRule } from "../lib/tauri";
-import { Plus, Trash2, X, Search, FileText, Copy, Check, ScrollText } from "lucide-react";
+import { Plus, Trash2, X, Search, FileText, Copy, Check, ScrollText, Edit3 } from "lucide-react";
 import type { Prompt } from "../types";
 import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
 import { useDeleteConfirmation } from "../lib/deleteConfirmation";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
+import DetailDrawer from "../components/DetailDrawer";
 
 const toast = () => useToastStore.getState();
 
@@ -16,11 +17,15 @@ export default function PromptsView() {
   const { loadRules } = useAppStore();
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Prompt | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
   const deleteConfirmation = useDeleteConfirmation();
+  const detailPrompt = detailId ? prompts.find((p) => p.id === detailId) ?? null : null;
 
   const handleDelete = async (id: number) => {
     await deletePrompt(id);
     await loadPrompts();
+    setDetailId(null);
     toast().show(t("prompts.deleted"), "info");
   };
 
@@ -72,33 +77,9 @@ export default function PromptsView() {
         ) : (
           <div className="p-4 grid grid-cols-2 gap-3">
            {filtered.map((p) => (
-              <div key={p.id} onClick={() => setEditing(p)} className="card p-4 cursor-pointer hover:border-border-strong hover:shadow-sm transition-all">
+              <div key={p.id} onClick={() => setDetailId(p.id)} className="card p-4 cursor-pointer hover:border-border-strong hover:shadow-sm transition-all">
                 <div className="flex items-start justify-between">
                   <h3 className="text-sm font-semibold text-heading truncate">{p.title}</h3>
-                  <div className="flex items-center gap-1 shrink-0 ml-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleApplyToRule(p).catch((err) => {
-                          toast().show(t("prompts.applyToRuleFailed", { msg: String(err) }), "error");
-                        });
-                      }}
-                      title={t("prompts.applyToRule")}
-                      className="btn-icon"
-                    >
-                      <ScrollText size={14} />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteConfirmation.request(p.title, () => handleDelete(p.id));
-                      }}
-                      className="btn-icon btn-icon-danger"
-                      title={t("common.delete")}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
                 </div>
                 <p className="text-xs text-faint mt-1.5 line-clamp-3">{p.content}</p>
                 {p.tags.length > 0 && (
@@ -127,6 +108,84 @@ export default function PromptsView() {
       )}
 
       <DeleteConfirmDialog controller={deleteConfirmation} testId="delete-prompt-dialog" />
+
+      <DetailDrawer
+        open={!!detailPrompt}
+        onClose={() => setDetailId(null)}
+        testId="prompt-detail-drawer"
+        icon={<FileText size={18} className="text-faint shrink-0" />}
+        title={detailPrompt?.title ?? ""}
+        subtitle={
+          <span className="flex items-center gap-1.5 flex-wrap">
+            <span>· {t("prompts.charCount", { count: detailPrompt?.content.length ?? 0 })}</span>
+          </span>
+        }
+        actions={
+          detailPrompt && (
+            <>
+              <button
+                onClick={async () => {
+                  await navigator.clipboard.writeText(detailPrompt.content);
+                  setCopiedId(detailPrompt.id);
+                  setTimeout(() => setCopiedId(null), 1500);
+                }}
+                className="btn btn-outline"
+              >
+                {copiedId === detailPrompt.id ? <Check size={14} /> : <Copy size={14} />}
+                {copiedId === detailPrompt.id ? t("common.copied") : t("common.copyAll")}
+              </button>
+              <button
+                onClick={() =>
+                  handleApplyToRule(detailPrompt).catch((err) => {
+                    toast().show(t("prompts.applyToRuleFailed", { msg: String(err) }), "error");
+                  })
+                }
+                className="btn btn-outline"
+                title={t("prompts.applyToRule")}
+              >
+                <ScrollText size={14} /> {t("prompts.applyToRule")}
+              </button>
+              <button onClick={() => setEditing(detailPrompt)} className="btn btn-primary ml-auto">
+                <Edit3 size={14} /> {t("common.edit")}
+              </button>
+              <button
+                onClick={() => deleteConfirmation.request(detailPrompt.title, () => handleDelete(detailPrompt.id))}
+                className="btn btn-ghost text-red-500"
+              >
+                <Trash2 size={14} /> {t("common.delete")}
+              </button>
+            </>
+          )
+        }
+      >
+        {detailPrompt && (
+          <>
+            {/* Tags */}
+            {detailPrompt.tags.length > 0 && (
+              <section className="px-5 py-3.5 border-b border-border-subtle">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <span className="text-2xs font-semibold text-faint uppercase tracking-wider">{t("prompts.detailTags")}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {detailPrompt.tags.map((tag) => (
+                    <span key={tag} className="badge bg-surface-2 text-muted">#{tag}</span>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Full content */}
+            <section className="px-5 py-3.5">
+              <span className="text-2xs font-semibold text-faint uppercase tracking-wider block mb-2">
+                {t("prompts.detailContent")}
+              </span>
+              <pre className="whitespace-pre-wrap break-words text-xs font-mono text-content leading-relaxed rounded-lg bg-surface-2 p-3">
+                {detailPrompt.content}
+              </pre>
+            </section>
+          </>
+        )}
+      </DetailDrawer>
     </div>
   );
 }

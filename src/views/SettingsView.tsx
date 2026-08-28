@@ -41,7 +41,7 @@ function LibrarySourceRow({
       </div>
       <span className={"text-[10px] font-mono px-2 py-0.5 rounded-full shrink-0 " +
         (lib.enabled ? "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400" : "bg-surface-2 text-faint")}>
-        {skillCount} skills
+        {t("settings.libs.skillCount", { count: skillCount })}
       </span>
       <button
         onClick={onToggle}
@@ -84,7 +84,7 @@ function LibrarySourcesSection() {
       setNewPath(home);
       if (!newName) {
         const parts = home.split("/");
-        setNewName(parts[parts.length - 1] || "新库源");
+        setNewName(parts[parts.length - 1] || t("settings.libs.defaultName"));
       }
     }
   };
@@ -95,7 +95,7 @@ function LibrarySourcesSection() {
     // "~/xxx" 归一化为 "xxx"（home 相对），其余输入原样保留。
     const normalized = newPath.trim() === "~" ? "" : newPath.trim().replace(/^~\/?/, "");
     if (!normalized) {
-      toast().show("库源路径无效", "error");
+      toast().show(t("settings.libs.invalidPath"), "error");
       return;
     }
     let id = newName.trim().toLowerCase().replace(/\s+/g, "-");
@@ -116,9 +116,9 @@ function LibrarySourcesSection() {
       setAdding(false);
       setNewName("");
       setNewPath("");
-      toast().show("库源已添加");
+      toast().show(t("settings.libs.added"));
     } catch {
-      toast().show("添加失败", "error");
+      toast().show(t("settings.libs.addFailed"), "error");
     }
   };
 
@@ -127,9 +127,9 @@ function LibrarySourcesSection() {
       await api.saveLibrarySource({ ...lib, enabled: !lib.enabled });
       await scanNow();
       await loadLibrarySources();
-      toast().show(lib.enabled ? "已禁用" : "已启用");
+      toast().show(lib.enabled ? t("settings.libs.disabled") : t("settings.libs.enabled"));
     } catch {
-      toast().show("操作失败", "error");
+      toast().show(t("common.operationFailed"), "error");
     }
   };
 
@@ -138,23 +138,23 @@ function LibrarySourcesSection() {
       await api.deleteLibrarySource(lib.id);
       await scanNow();
       await loadLibrarySources();
-      toast().show("库源已删除");
+      toast().show(t("settings.libs.deleted"));
     } catch {
-      toast().show("删除失败", "error");
+      toast().show(t("settings.libs.deleteFailed"), "error");
     }
   };
 
   return (
     <Section
       icon={<FolderTree size={14} />}
-      title="库源管理"
+      title={t("settings.libs.title")}
       action={
-        <button onClick={() => setAdding(true)} className="btn-icon" title="添加库源">
+        <button onClick={() => setAdding(true)} className="btn-icon" title={t("settings.libs.add")}>
           <Plus size={14} />
         </button>
       }
     >
-      <p className="text-[11px] text-faint pb-3">登记 skill 来源目录，启用 / 禁用参与扫描。库源只作为发现源，不直接加载到任何 Agent。</p>
+      <p className="text-[11px] text-faint pb-3">{t("settings.libs.desc")}</p>
       <div className="divide-y divide-border-subtle">
         {librarySources.map((lib) => (
           <LibrarySourceRow
@@ -167,7 +167,7 @@ function LibrarySourcesSection() {
           />
         ))}
         {librarySources.length === 0 && (
-          <p className="text-xs text-faint py-4 text-center">还没有库源，添加一个吧</p>
+          <p className="text-xs text-faint py-4 text-center">{t("settings.libs.empty")}</p>
         )}
       </div>
 
@@ -176,7 +176,7 @@ function LibrarySourcesSection() {
           <div className="absolute inset-0 bg-black/30" />
           <div className="relative bg-surface rounded-2xl shadow-2xl w-[440px] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-subtle">
-              <h3 className="text-sm font-bold">添加库源</h3>
+              <h3 className="text-sm font-bold">{t("settings.libs.add")}</h3>
               <button
                 onClick={() => { setAdding(false); setNewName(""); setNewPath(""); }}
                 className="btn-icon"
@@ -187,26 +187,26 @@ function LibrarySourcesSection() {
 
             <div className="px-5 py-4 space-y-3">
               <div>
-                <label className="text-[11px] text-faint mb-1 block">库源名称</label>
+                <label className="text-[11px] text-faint mb-1 block">{t("settings.libs.nameLabel")}</label>
                 <input
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="库源名称（如：主库、写作库）"
+                  placeholder={t("settings.libs.namePlaceholder")}
                   className="input"
                   autoFocus
                 />
               </div>
               <div>
-                <label className="text-[11px] text-faint mb-1 block">目录路径</label>
+                <label className="text-[11px] text-faint mb-1 block">{t("settings.libs.pathLabel")}</label>
                 <div className="flex items-center gap-2">
                   <input
                     value={newPath}
                     onChange={(e) => setNewPath(e.target.value)}
-                    placeholder="目录路径（如 ~/.skilldeck/skills）"
+                    placeholder={t("settings.libs.pathPlaceholder")}
                     className="input flex-1 font-mono"
                   />
                   <button onClick={handlePickFolder} className="btn btn-outline btn-sm shrink-0">
-                    <FolderOpen size={13} /> 选择
+                    <FolderOpen size={13} /> {t("settings.libs.pick")}
                   </button>
                 </div>
               </div>
@@ -220,7 +220,7 @@ function LibrarySourcesSection() {
                 {t("common.cancel")}
               </button>
               <button onClick={handleAdd} disabled={!newName.trim() || !newPath.trim()} className="btn btn-primary">
-                <Plus size={13} /> 添加
+                <Plus size={13} /> {t("settings.libs.addBtn")}
               </button>
             </div>
           </div>
