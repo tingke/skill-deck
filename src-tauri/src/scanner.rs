@@ -128,6 +128,65 @@ fn detect_permissions(content: &str, has_scripts: bool) -> Vec<String> {
      format!("{:x}", hasher.finalize())
  }
 
+ /// 审计缓存与更新比对共用的目录噪声规则：这些目录/文件不参与内容判定
+ fn is_hash_noise(name: &str, is_dir: bool) -> bool {
+     if is_dir {
+         name == ".git" || name == "__pycache__" || name == ".DS_Store"
+     } else {
+         name == ".DS_Store"
+     }
+ }
+
+ fn hash_directory(dir: &Path, root: &Path, hasher: &mut Sha256) {
+     let mut children: Vec<PathBuf> = match fs::read_dir(dir) {
+         Ok(entries) => entries.flatten().map(|entry| entry.path()).collect(),
+         Err(_) => return,
+     };
+     children.sort();
+
+     for path in children {
+         let name = path
+             .file_name()
+             .map(|n| n.to_string_lossy().to_string())
+             .unwrap_or_default();
+         if is_hash_noise(&name, path.is_dir()) {
+             continue;
+         }
+         let relative = path
+             .strip_prefix(root)
+             .unwrap_or(&path)
+             .to_string_lossy();
+         if path.is_dir() {
+             hasher.update(relative.as_bytes());
+             hasher.update(b"\0dir\0");
+             hash_directory(&path, root, hasher);
+         } else if path.is_symlink() {
+             let target = fs::read_link(&path)
+                 .unwrap_or_default()
+                 .to_string_lossy()
+                 .to_string();
+             hasher.update(relative.as_bytes());
+             hasher.update(b"\0link\0");
+             hasher.update(target.as_bytes());
+             hasher.update(b"\0");
+         } else {
+             let content = fs::read(&path).unwrap_or_default();
+             hasher.update(relative.as_bytes());
+             hasher.update(b"\0file\0");
+             hasher.update(&content);
+             hasher.update(b"\0");
+         }
+     }
+ }
+
+ /// 计算整个 skill 目录的确定性 hash：排序后的相对路径 + 文件内容。
+ /// 跳过 .git / __pycache__ / .DS_Store，避免无关噪声触发更新或审计缓存失效。
+ pub fn directory_hash(dir: &Path) -> String {
+     let mut hasher = Sha256::new();
+     hash_directory(dir, dir, &mut hasher);
+     format!("{:x}", hasher.finalize())
+ }
+
  /// 扫描单个 skill 目录，返回解析后的元数据
 pub fn scan_skill_dir(dir: &Path, source_lib: &str) -> Option<ScanResult> {
    let name = dir.file_name()?.to_string_lossy().to_string();
@@ -449,6 +508,9 @@ pub fn get_all_skills(conn: &Connection) -> Vec<SkillRow> {
         .prepare(
             "SELECT s.id, s.name, s.source_lib, s.path, s.description, s.content_hash, s.tags, s.enabled,
                     s.author, s.license, s.version, s.permissions,
+                    (SELECT a.verdict FROM skill_audits a WHERE a.skill_id = s.id ORDER BY a.id DESC LIMIT 1),
+                    (SELECT o.origin_type FROM skill_origins o WHERE o.skill_id = s.id),
+                    (SELECT o.origin_ref FROM skill_origins o WHERE o.skill_id = s.id),
                      GROUP_CONCAT(c.runtime) as linked_runtimes
               FROM skills s
               LEFT JOIN connections c ON s.id = c.skill_id AND c.linked = 1
@@ -465,10 +527,13 @@ pub fn get_all_skills(conn: &Connection) -> Vec<SkillRow> {
         let license: String = row.get(9).unwrap_or_default();
         let version: String = row.get(10).unwrap_or_default();
         let perms_str: String = row.get(11).unwrap_or_else(|_| "[]".to_string());
+        let audit_verdict: Option<String> = row.get(12).unwrap_or(None);
+        let origin_type: Option<String> = row.get(13).unwrap_or(None);
+        let origin_ref: Option<String> = row.get(14).unwrap_or(None);
         let permissions: Vec<String> = serde_json::from_str(&perms_str).unwrap_or_default();
         let tags: Vec<String> =
             serde_json::from_str(&tags_str).unwrap_or_default();
-        let linked_str: String = row.get::<_, Option<String>>(12).unwrap_or(None).unwrap_or_default();
+        let linked_str: String = row.get::<_, Option<String>>(15).unwrap_or(None).unwrap_or_default();
         let links: Vec<String> = if linked_str.is_empty() {
             vec![]
         } else {
@@ -488,6 +553,9 @@ pub fn get_all_skills(conn: &Connection) -> Vec<SkillRow> {
             license,
             version,
             permissions,
+            audit_verdict,
+            origin_type,
+            origin_ref,
         })
     })
     .expect("failed to query skills")

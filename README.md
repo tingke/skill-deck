@@ -17,6 +17,8 @@ SkillDeck 是一个本地 AI Skill 管理器，用来集中管理 Skills、Promp
 ## 功能
 
 - **Skill 库源管理**：登记多个本地库源，扫描 `SKILL.md`，查看描述、标签、权限和内容。
+- **Skill 安装与更新**：从 Git 仓库、Zip 压缩包或本地目录安装 Skill 到指定库源；记录安装来源与版本，支持检查更新、本地改动检测和事务性替换回滚。
+- **Skill 安全审查**：安装与更新前自动执行静态安全审查（凭据读取、破坏性命令、提示注入、可执行二进制、symlink 逃逸等），阻断级问题默认拦截，可显式确认放行。
 - **Agent 接线**：为 Skill 创建或断开到各 Agent skills 目录的链接，支持单选和批量操作。
 - **冲突识别**：区分软链接、真实目录和真实文件，避免误删或覆盖已有入口。
 - **场景预设**：按场景维护 Skill 组合，一键切换当前 Agent 的能力挂载。
@@ -109,13 +111,13 @@ macOS 数据目录：
 Release 由 GitHub Actions 自动构建：
 
 1. 提交并推送代码到 `main`。
-2. 创建版本标签并推送，例如 `v0.0.1`。
+2. 创建版本标签并推送，例如 `v0.0.2`。
 3. `v*` 标签触发 `.github/workflows/release.yml`。
 4. Actions 构建 macOS universal DMG 和 Windows x64 安装包，自动生成 Release Notes 并发布到 GitHub Releases。
 
 ```bash
-git tag v0.0.1
-git push origin v0.0.1
+git tag v0.0.2
+git push origin v0.0.2
 ```
 
 ## 项目结构

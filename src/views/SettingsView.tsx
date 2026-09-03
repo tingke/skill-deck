@@ -385,7 +385,7 @@ export default function SettingsView() {
         >
           <div className="space-y-2.5 text-xs">
             <KV label={t("settings.projectName")} value="SkillDeck" />
-            <KV label={t("settings.version")} value={appInfo?.version ?? "0.0.1"} />
+            <KV label={t("settings.version")} value={appInfo?.version ?? "0.0.2"} />
             <p className="text-muted leading-relaxed pt-1">
               {t("settings.appDescription")}
             </p>

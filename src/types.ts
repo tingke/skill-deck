@@ -12,6 +12,59 @@ export interface Skill {
   license: string;
   version: string;
   permissions: string[];
+  audit_verdict?: string | null;
+  origin_type?: string | null;
+  origin_ref?: string | null;
+}
+
+export type AuditSeverity = "info" | "warn" | "block";
+export type AuditVerdict = "pass" | "warn" | "block";
+
+export interface AuditFinding {
+  rule_id: string;
+  severity: AuditSeverity;
+  location: string;
+  message: string;
+}
+
+export interface AuditReport {
+  content_hash: string;
+  verdict: AuditVerdict;
+  findings: AuditFinding[];
+  created_at: string;
+}
+
+export type SkillSourceKind = "git" | "archive" | "path";
+
+export interface SkillSourceInput {
+  kind: SkillSourceKind;
+  source_ref: string;
+}
+
+export type InstallStatus =
+  | "installed"
+  | "conflict"
+  | "audit_blocked"
+  | "audit_warned"
+  | "up_to_date"
+  | "local_changes"
+  | "updated";
+
+export interface InstallResult {
+  status: InstallStatus;
+  skill_id: string | null;
+  skill_name: string;
+  target_path: string;
+  message: string;
+  report: AuditReport | null;
+}
+
+export interface UpdateAvailability {
+  skill_id: string;
+  skill_name: string;
+  has_update: boolean;
+  local_changes: boolean;
+  error: string | null;
 }
 
 export type ConnectionKind = "symlink" | "real_directory" | "real_file";

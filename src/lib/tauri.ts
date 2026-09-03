@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Skill, ActivityLog, Prompt, Rule, AgentInfo, ProjectRow, SkillConnectionState } from "../types";
+import type {
+  Skill, ActivityLog, Prompt, Rule, AgentInfo, ProjectRow, SkillConnectionState,
+  AuditReport, InstallResult, SkillSourceInput, UpdateAvailability,
+} from "../types";
 import type { AgentRow } from "../types";
 
 // Agent 配置；保留 get_runtimes 命令作为 Tauri 兼容入口
@@ -60,6 +63,29 @@ export const listSkillFiles = (skillId: string) =>
 
 export const readSkillFileByPath = (skillId: string, filePath: string) =>
   invoke<string>("read_skill_file_path", { skillId, filePath });
+
+// skill 安全审查
+export const auditSkill = (skillId: string) =>
+  invoke<AuditReport>("audit_skill", { skillId });
+
+export const getSkillAudit = (skillId: string) =>
+  invoke<AuditReport>("get_skill_audit", { skillId });
+
+// skill 安装 / 更新
+export const installSkill = (
+  source: SkillSourceInput,
+  librarySourceId: string,
+  overrideAudit = false,
+) => invoke<InstallResult>("install_skill", { source, librarySourceId, overrideAudit });
+
+export const updateSkill = (
+  skillId: string,
+  overrideAudit = false,
+  allowLocalChanges = false,
+) => invoke<InstallResult>("update_skill", { skillId, overrideAudit, allowLocalChanges });
+
+export const checkSkillUpdates = (skillIds: string[]) =>
+  invoke<UpdateAvailability[]>("check_skill_updates", { skillIds });
 
 // 库源 (Library Sources)
 import type { LibrarySource } from "../types";

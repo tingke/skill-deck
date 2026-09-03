@@ -9,6 +9,8 @@ pub mod project_packages;
 pub mod agents;
 pub mod settings;
 pub mod skill_connections;
+pub mod skill_audit;
+pub mod skill_install;
 
 use db::{DbState, open};
 use tauri::Manager;
@@ -110,6 +112,13 @@ pub fn run() {
             commands::toggle_skill_enabled,
             commands::list_skill_files,
             commands::read_skill_file_path,
+            // skill 安全审查
+            skill_audit::audit_skill,
+            skill_audit::get_skill_audit,
+            // skill 安装 / 更新
+            skill_install::install_skill,
+            skill_install::update_skill,
+            skill_install::check_skill_updates,
             // library sources (库源管理)
             commands::get_library_sources,
             commands::save_library_source,

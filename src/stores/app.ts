@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Skill, ViewKey, Prompt, Rule, AgentInfo, ActivityLog, PackageRow, ExtensionRow, LibrarySource, SkillConnectionState, SharedDisconnectConfirmation, SkillDeleteConfirmation, AgentActivitySnapshot } from "../types";
+import type { Skill, ViewKey, Prompt, Rule, AgentInfo, ActivityLog, PackageRow, ExtensionRow, LibrarySource, SkillConnectionState, SharedDisconnectConfirmation, SkillDeleteConfirmation, AgentActivitySnapshot, AuditReport } from "../types";
 import type { SkillFileEntry } from "../types";
 import type { AgentRow, ProjectRow } from "../types";
 import * as api from "../lib/tauri";
@@ -30,6 +30,8 @@ interface AppState {
   selectedFilePath: string | null;
   selectedFileContent: string;
   editingSkill: boolean;
+  skillAudit: AuditReport | null;
+  auditingSkill: boolean;
   prompts: Prompt[];
   rules: Rule[];
   activity: ActivityLog[];
@@ -66,6 +68,8 @@ interface AppState {
   loadFileContent: (skillId: string, filePath: string) => Promise<void>;
   saveSkillContent: (id: string, content: string) => Promise<void>;
   setEditingSkill: (v: boolean) => void;
+  loadSkillAudit: (id: string) => Promise<void>;
+  runSkillAudit: (id: string) => Promise<void>;
   loadPrompts: () => Promise<void>;
   loadRules: () => Promise<void>;
   loadActivity: () => Promise<void>;
@@ -97,6 +101,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedFilePath: null,
   selectedFileContent: "",
   editingSkill: false,
+  skillAudit: null,
+  auditingSkill: false,
   prompts: [],
   rules: [],
   activity: [],
@@ -358,11 +364,12 @@ export const useAppStore = create<AppState>((set, get) => ({
  },
 
   selectSkill: (id) => {
-    set({ selectedSkillId: id, skillContent: "", skillFiles: [], skillConnections: [], selectedFilePath: null, selectedFileContent: "", editingSkill: false });
+    set({ selectedSkillId: id, skillContent: "", skillFiles: [], skillConnections: [], selectedFilePath: null, selectedFileContent: "", editingSkill: false, skillAudit: null });
     if (id) {
       get().loadSkillContent(id);
       get().loadSkillFiles(id);
       get().loadSkillConnections(id);
+      get().loadSkillAudit(id);
     }
   },
 
@@ -400,6 +407,40 @@ export const useAppStore = create<AppState>((set, get) => ({
  },
 
   setEditingSkill: (v) => set({ editingSkill: v }),
+
+  loadSkillAudit: async (id) => {
+    try {
+      const report = await api.getSkillAudit(id);
+      set({ skillAudit: report });
+    } catch (error) {
+      console.error(error);
+      set({ skillAudit: null });
+    }
+  },
+
+  runSkillAudit: async (id) => {
+    if (get().auditingSkill) return;
+    set({ auditingSkill: true });
+    try {
+      const report = await api.auditSkill(id);
+      set((state) => ({
+        skillAudit: report,
+        auditingSkill: false,
+        skills: state.skills.map((skill) =>
+          skill.id === id ? { ...skill, audit_verdict: report.verdict } : skill,
+        ),
+      }));
+      toast().show(
+        report.verdict === "pass" ? "安全审查通过" : report.verdict === "warn" ? "安全审查有警告" : "安全审查发现阻断问题",
+        report.verdict === "pass" ? "success" : "error",
+      );
+      get().loadActivity();
+    } catch (error) {
+      set({ auditingSkill: false });
+      console.error(error);
+      toast().show("安全审查失败", "error");
+    }
+  },
 
   loadPrompts: async () => {
     try { set({ prompts: await api.getPrompts() }); } catch { /* ignore */ }

@@ -8,15 +8,19 @@ import {
   FilePen, Cpu, Globe, User, Scale, ChevronUp,
   ExternalLink, Loader2, Plus,
   ArchiveRestore,
+  Download, TriangleAlert, OctagonX, RefreshCw, ArrowUp, GitBranch,
 } from "lucide-react";
-import type { Skill, AgentInfo, SkillFileEntry, SkillConnectionState } from "../types";
-import { revealInFinder, readSkillFileByPath, batchConnect, getHomeDirectory } from "../lib/tauri";
+import type { Skill, AgentInfo, SkillFileEntry, SkillConnectionState, InstallResult, UpdateAvailability } from "../types";
+import { revealInFinder, readSkillFileByPath, batchConnect, getHomeDirectory, checkSkillUpdates, updateSkill } from "../lib/tauri";
 import { getDisconnectableSkillIds } from "../lib/skillBatch";
 import { formatSkillPath } from "../lib/skillPaths";
+import { auditVerdictMeta, INSTALL_STATUS_META, needsUserConfirm } from "../lib/skillAudit";
 import { buildBatchSharedDisconnectConfirmation } from "../lib/connectionConfirmation";
 import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
 import { AgentGlyph } from "../components/AgentGlyph";
+import AuditFindings from "../components/AuditFindings";
+import InstallSkillDialog from "../components/InstallSkillDialog";
 import DetailDrawer from "../components/DetailDrawer";
 
 const ALL = "__all__";
@@ -84,6 +88,20 @@ function PermissionBadges({ perms }: { perms: string[] }) {
   );
 }
 
+// ---- Audit verdict icon in table ----
+function AuditVerdictIcon({ verdict }: { verdict?: string | null }) {
+  if (verdict === "pass") {
+    return <span title="安全审查通过"><ShieldCheck size={13} className="inline text-emerald-500" /></span>;
+  }
+  if (verdict === "warn") {
+    return <span title="安全审查有警告"><TriangleAlert size={13} className="inline text-amber-500" /></span>;
+  }
+  if (verdict === "block") {
+    return <span title="安全审查阻断"><OctagonX size={13} className="inline text-red-500" /></span>;
+  }
+  return <span title="尚未审查"><Clock size={13} className="inline text-faint opacity-40" /></span>;
+}
+
 // ---- Table row ----
 function SkillTableRow({
   skill, agentOptions, selected, multiSelect, checked, onSelect, onToggleCheck,
@@ -137,7 +155,7 @@ function SkillTableRow({
         ))}
       </div>
       <div className="text-center"><PermissionBadges perms={skill.permissions} /></div>
-      <div className="text-center"><Clock size={13} className="inline text-faint opacity-40" /></div>
+      <div className="text-center"><AuditVerdictIcon verdict={skill.audit_verdict} /></div>
       <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
         <MiniToggle checked={skill.enabled} onChange={() => useAppStore.getState().toggleSkillEnabled(skill.id, !skill.enabled)} />
       </div>
@@ -342,6 +360,185 @@ function ConnectionSummary({ connection }: { connection: SkillConnectionState })
   );
 }
 
+// ---- Audit section in detail panel ----
+function SkillAuditSection({ skillId }: { skillId: string }) {
+  const { skillAudit, auditingSkill, runSkillAudit } = useAppStore();
+  const meta = skillAudit ? auditVerdictMeta(skillAudit.verdict) : null;
+
+  return (
+    <div className="px-5 py-3 border-b border-border-subtle">
+      <div className="flex items-center gap-1.5 mb-2">
+        <ShieldCheck size={12} className="text-faint" />
+        <span className="text-2xs font-semibold text-faint uppercase tracking-wider">安全审查</span>
+        <button
+          onClick={() => runSkillAudit(skillId)}
+          disabled={auditingSkill}
+          className="ml-auto flex items-center gap-1 text-2xs text-faint hover:text-violet-600 transition-colors"
+        >
+          {auditingSkill ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} 重新审查
+        </button>
+      </div>
+      {skillAudit ? (
+        <div className="space-y-2">
+          <span className={"inline-block text-2xs px-2 py-0.5 rounded-md font-medium " + (meta?.badge ?? "")}>
+            {meta?.label ?? skillAudit.verdict}
+          </span>
+          <AuditFindings findings={skillAudit.findings} />
+        </div>
+      ) : (
+        <div className="text-2xs text-faint">尚未审查，点击「重新审查」开始静态安全检查</div>
+      )}
+    </div>
+  );
+}
+
+// ---- Origin & update section in detail panel ----
+function SkillUpdateSection({ skill, agentOptions }: { skill: Skill; agentOptions: AgentInfo[] }) {
+  const [checking, setChecking] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [availability, setAvailability] = useState<UpdateAvailability | null>(null);
+  const [result, setResult] = useState<InstallResult | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  if (!skill.origin_type) return null;
+
+  const runCheck = async () => {
+    setChecking(true);
+    setAvailability(null);
+    setResult(null);
+    setConfirming(false);
+    try {
+      const list = await checkSkillUpdates([skill.id]);
+      const first = list[0] ?? null;
+      setAvailability(first);
+      if (first?.error) {
+        useToastStore.getState().show(first.error, "error");
+      } else if (first && !first.has_update) {
+        useToastStore.getState().show("已是最新版本");
+      }
+    } catch (error) {
+      console.error(error);
+      useToastStore.getState().show("检查更新失败", "error");
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const runUpdate = async (overrideAudit: boolean, allowLocalChanges: boolean) => {
+    setUpdating(true);
+    try {
+      const updateResult = await updateSkill(skill.id, overrideAudit, allowLocalChanges);
+      setResult(updateResult);
+      if (updateResult.status === "updated") {
+        useToastStore.getState().show(`已更新 ${updateResult.skill_name}`);
+        await useAppStore.getState().loadSkills();
+        await useAppStore.getState().loadSkillAudit(skill.id);
+        setAvailability(null);
+        setConfirming(false);
+      }
+    } catch (error) {
+      console.error(error);
+      useToastStore.getState().show(
+        error instanceof Error ? error.message : "更新失败",
+        "error",
+      );
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const affectedLabels = skill.links
+    .map((agentId) => agentOptions.find((agent) => agent.id === agentId)?.label ?? agentId);
+
+  return (
+    <div className="px-5 py-3 border-b border-border-subtle">
+      <div className="flex items-center gap-1.5 mb-2">
+        <GitBranch size={12} className="text-faint" />
+        <span className="text-2xs font-semibold text-faint uppercase tracking-wider">来源与更新</span>
+        <button
+          onClick={runCheck}
+          disabled={checking || updating}
+          className="ml-auto flex items-center gap-1 text-2xs text-faint hover:text-violet-600 transition-colors"
+        >
+          {checking ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} 检查更新
+        </button>
+      </div>
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2 text-xs min-w-0">
+          <span className="text-faint shrink-0">来源</span>
+          <span className="text-2xs px-1.5 py-0.5 rounded bg-surface-2 text-muted font-medium shrink-0">
+            {skill.origin_type === "git" ? "Git" : skill.origin_type === "archive" ? "Zip" : "本地目录"}
+          </span>
+          <span className="text-2xs text-faint font-mono truncate min-w-0" title={skill.origin_ref ?? ""}>
+            {skill.origin_ref}
+          </span>
+        </div>
+
+        {availability?.has_update && !confirming && (
+          <button
+            onClick={() => setConfirming(true)}
+            disabled={updating}
+            className="btn btn-outline btn-sm"
+          >
+            <ArrowUp size={12} /> 更新
+          </button>
+        )}
+
+        {availability?.has_update && confirming && (
+          <div className="space-y-2 rounded-lg border border-border-subtle bg-surface-2 p-3">
+            <div className="text-2xs text-muted leading-relaxed">
+              更新会替换库源中的内容；所有已连接的 Agent 通过 symlink 自动使用新版本。
+              {availability.local_changes && (
+                <span className="text-amber-600 dark:text-amber-400"> 检测到本地改动，更新后将丢失。</span>
+              )}
+            </div>
+            {affectedLabels.length > 0 && (
+              <div className="text-2xs text-faint">受影响 Agent：{affectedLabels.join("、")}</div>
+            )}
+            <div className="flex items-center gap-2">
+              <button className="btn btn-ghost btn-sm" onClick={() => setConfirming(false)} disabled={updating}>
+                取消
+              </button>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => runUpdate(false, availability.local_changes)}
+                disabled={updating}
+              >
+                {updating ? <Loader2 size={12} className="animate-spin" /> : <ArrowUp size={12} />} 确认更新
+              </button>
+            </div>
+          </div>
+        )}
+
+        {result && needsUserConfirm(result.status) && (
+          <div className="space-y-2 rounded-lg border border-border-subtle bg-surface-2 p-3">
+            <div className="text-2xs font-medium text-heading">
+              {INSTALL_STATUS_META[result.status]?.label ?? result.status}
+            </div>
+            <div className="text-2xs text-muted">{result.message}</div>
+            {result.report && result.report.findings.length > 0 && (
+              <AuditFindings findings={result.report.findings} />
+            )}
+            <button
+              className="btn btn-danger btn-sm"
+              onClick={() =>
+                runUpdate(
+                  result.status !== "local_changes",
+                  availability?.local_changes || result.status === "local_changes",
+                )
+              }
+              disabled={updating}
+            >
+              {updating ? <Loader2 size={12} className="animate-spin" /> : <TriangleAlert size={12} />}
+              {result.status === "local_changes" ? "覆盖本地改动并更新" : "我已了解风险，仍要更新"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ---- Detail panel ----
 function SkillDetail() {
   const t = useT();
@@ -451,6 +648,12 @@ function SkillDetail() {
             <span className="text-2xs text-faint">无额外权限需求</span>
           )}
         </div>
+
+        {/* audit */}
+        <SkillAuditSection skillId={skill.id} />
+
+        {/* origin & updates */}
+        <SkillUpdateSection skill={skill} agentOptions={agentOptions} />
 
         {/* Agent connections */}
         <div className="px-5 py-3 border-b border-border-subtle">
@@ -597,6 +800,7 @@ export default function SkillsView() {
   const [railFilter, setRailFilter] = useState<string>(ALL);
   const [multiSelect, setMultiSelect] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [installOpen, setInstallOpen] = useState(false);
   const tagClusters = useMemo(() => {
     const map = new Map<string, number>();
     skills.forEach((s) => s.tags.forEach((tag) => map.set(tag, (map.get(tag) || 0) + 1)));
@@ -679,6 +883,13 @@ export default function SkillsView() {
             title="多选模式"
           >
             <CheckSquare size={13} /> <span className="skills-toolbar-label">多选模式</span>
+          </button>
+          <button
+            onClick={() => setInstallOpen(true)}
+            className="btn btn-primary btn-sm shrink-0"
+            title="从 Git 仓库 / Zip / 本地目录安装 Skill"
+          >
+            <Download size={13} /> <span className="skills-toolbar-label">安装</span>
           </button>
           <button onClick={() => useAppStore.getState().setView("presets")} className="btn btn-ghost btn-sm shrink-0" title="应用预设">
             <Layers size={13} /> <span className="skills-toolbar-label">应用预设</span>
@@ -903,6 +1114,12 @@ export default function SkillsView() {
       >
         <SkillDetail />
       </DetailDrawer>
+
+      <InstallSkillDialog
+        open={installOpen}
+        onClose={() => setInstallOpen(false)}
+        librarySources={librarySources}
+      />
 
     </div>
   );

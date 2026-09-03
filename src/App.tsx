@@ -310,7 +310,7 @@ const items: { key: ViewKey; label: string; icon: React.ReactNode; badge?: numbe
        >
          <SettingsIcon size={17} />
          {expanded && <span className="truncate">{t("nav.settings")}</span>}
-         {expanded && <span className="ml-auto text-2xs font-mono opacity-60">v0.0.1</span>}
+        {expanded && <span className="ml-auto text-2xs font-mono opacity-60">v0.0.2</span>}
      </button>
     </div>
     </aside>

@@ -252,6 +252,28 @@ fn migrate(conn: &Connection) {
           tags        TEXT NOT NULL,
           updated_at  TEXT NOT NULL
       );
+
+       -- 安全审查报告缓存：同一 skill 同一目录 hash 只保留最新结论
+       CREATE TABLE IF NOT EXISTS skill_audits (
+           id           INTEGER PRIMARY KEY,
+           skill_id     TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+           content_hash TEXT NOT NULL,
+           verdict      TEXT NOT NULL,
+           findings     TEXT NOT NULL DEFAULT '[]',
+           created_at   TEXT NOT NULL
+       );
+       CREATE INDEX IF NOT EXISTS idx_skill_audits_skill
+           ON skill_audits(skill_id, id);
+
+       -- 安装来源：skill 从哪来、安装时的整目录 hash，用于更新比对
+       CREATE TABLE IF NOT EXISTS skill_origins (
+           skill_id          TEXT PRIMARY KEY REFERENCES skills(id) ON DELETE CASCADE,
+           origin_type       TEXT NOT NULL,
+           origin_ref        TEXT NOT NULL,
+           installed_version TEXT NOT NULL DEFAULT '',
+           installed_hash    TEXT NOT NULL,
+           updated_at        TEXT NOT NULL
+       );
        "#,
     )
     .expect("failed to migrate db");
@@ -544,6 +566,21 @@ mod migration_tests {
     use super::*;
 
     #[test]
+    fn migrate_creates_audit_and_origin_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn);
+
+        let audit_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('skill_audits', 'skill_origins')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(audit_count, 2);
+    }
+
+    #[test]
     fn migrates_default_library_typos_without_touching_custom_sources() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute(
@@ -606,6 +643,9 @@ pub struct SkillRow {
     pub license: String,
     pub version: String,
     pub permissions: Vec<String>,
+    pub audit_verdict: Option<String>,
+    pub origin_type: Option<String>,
+    pub origin_ref: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

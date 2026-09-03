@@ -800,6 +800,21 @@ code, pre, kbd { font-family: var(--font-mono); }
   margin-top: var(--space-4);
 }
 
+/* ---- Install skill dialog（表单型模态，比确认对话框更宽） ---- */
+.install-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: min(520px, 100%);
+  max-height: min(640px, 90vh);
+  overflow-y: auto;
+  padding: var(--space-5);
+  border: 1px solid rgb(var(--c-border));
+  border-radius: var(--radius-lg);
+  background: rgb(var(--c-surface));
+  box-shadow: var(--shadow-xl);
+}
+
 /* ---- Right-side detail drawer (agents / presets / prompts cards) ---- */
 .detail-drawer-overlay {
   position: fixed;
