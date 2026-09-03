@@ -10,6 +10,8 @@
       "typecheck": "tsc --noEmit",
       "test": "node scripts/run-unit-tests.mjs",
       "test:layout": "node scripts/verify-layout.mjs",
+      "release:prepare": "node scripts/prepare-release.mjs",
+      "release:verify": "node scripts/verify-release.mjs",
       "tauri:dev": "tauri dev",
       "tauri:build": "tauri build",
       "clean": "rm -rf node_modules/.vite dist src-tauri/target/debug/build src-tauri/target/debug/deps src-tauri/target/debug/incremental"

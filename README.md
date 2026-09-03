@@ -110,14 +110,17 @@ macOS 数据目录：
 
 Release 由 GitHub Actions 自动构建：
 
-1. 提交并推送代码到 `main`。
-2. 创建版本标签并推送，例如 `v0.0.2`。
-3. `v*` 标签触发 `.github/workflows/release.yml`。
-4. Actions 构建 macOS universal DMG 和 Windows x64 安装包，自动生成 Release Notes 并发布到 GitHub Releases。
+1. 在 [`CHANGELOG.md`](./CHANGELOG.md) 的 `Unreleased` 小节填写本次用户可见变化。
+2. 运行 `npm run release:prepare -- 0.0.3`，同步前端、Tauri 和 Cargo 版本，并把 changelog 转成带日期的正式版本小节。
+3. 检查 diff 并运行发布前检查，然后运行 `npm run release:verify -- 0.0.3`。
+4. 提交并推送代码到 `main`。
+5. 创建版本标签并推送，例如 `v0.0.3`。
+6. `v*` 标签触发 `.github/workflows/release.yml`。
+7. Actions 校验 tag 对应的版本和 changelog，使用该版本 changelog 作为 Release Notes，构建 macOS universal DMG 和 Windows x64 安装包并发布到 GitHub Releases。
 
 ```bash
-git tag v0.0.2
-git push origin v0.0.2
+git tag v0.0.3
+git push origin v0.0.3
 ```
 
 ## 项目结构

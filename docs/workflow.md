@@ -50,11 +50,13 @@
 ## 发布流程
 
 1. 确认 CI 通过。
-2. 版本号同步 `package.json` 和 `src-tauri/tauri.conf.json`；Cargo 版本来自 `src-tauri/Cargo.toml`。
-3. 经确认后合入 `main`。
-4. 创建并推送 `vX.Y.Z` tag。
-5. `v*` tag 触发 `.github/workflows/release.yml`。
-6. Actions 构建 macOS universal DMG 和 Windows x64 安装包，创建 draft Release、上传产物后发布。
+2. 在 `CHANGELOG.md` 的 `Unreleased` 小节填写用户可见变化。
+3. 运行 `npm run release:prepare -- X.Y.Z` 同步 `package.json`、`package-lock.json`、Tauri 配置、Cargo manifest/lock，并把 `Unreleased` 转成带日期的正式版本小节。
+4. 检查 diff、运行发布前检查和 `npm run release:verify -- X.Y.Z`。
+5. 经确认后合入 `main`。
+6. 创建并推送 `vX.Y.Z` tag。
+7. `v*` tag 触发 `.github/workflows/release.yml`。
+8. Actions 校验 tag 对应版本和 changelog，构建 macOS universal DMG 和 Windows x64 安装包，创建使用 changelog 内容的 draft Release、上传产物后发布。
 
 不要手工重签或修改已发布产物；发布失败时先读 Actions 日志，再决定重跑 job 或重新打 tag。
 

@@ -25,18 +25,22 @@ jobs:
       contents: write
 
     steps:
-      - name: Check out repository
+      - name: Check out release tag
         uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
 
       - name: Validate release tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tag must look like v0.1.0 or v0.1.0-rc.1: $RELEASE_TAG"
-            exit 1
-          fi
+          node scripts/verify-release.mjs "$RELEASE_TAG"
 
           if ! git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG"; then
             echo "Tag $RELEASE_TAG does not exist. Push the tag first, then re-run this workflow."
@@ -44,9 +48,18 @@ jobs:
           fi
 
           if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"; then
-            NOTES=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
-              -f tag_name="$RELEASE_TAG" \
-              --jq '.body')
+            VERSION="${RELEASE_TAG#v}"
+            NOTES=$(awk -v ver="$VERSION" '
+              index($0, "## [" ver "] - ") == 1 { inside=1; next }
+              inside && /^## \[/ { exit }
+              inside { print }
+            ' CHANGELOG.md)
+
+            if [[ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]]; then
+              echo "Changelog section for $VERSION is empty."
+              exit 1
+            fi
+
             gh api "repos/$GITHUB_REPOSITORY/releases" \
               -f tag_name="$RELEASE_TAG" \
               -f name="SkillDeck $RELEASE_TAG" \

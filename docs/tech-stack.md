@@ -48,6 +48,8 @@
 | `npm run test:layout` | 检查布局源码契约和 Tauri 窗口契约 |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build` | TypeScript 检查并构建前端 |
+| `npm run release:prepare -- X.Y.Z` | 同步全部发布版本字段，并把 changelog `Unreleased` 转成正式版本小节 |
+| `npm run release:verify -- X.Y.Z` | 校验版本字段、changelog 日期小节和内容 |
 | `npm run tauri:build` | 构建桌面安装包 |
 | `npm run clean` | 删除 Vite/Cargo 增量产物；执行前确认没有未保存产物依赖 |
 | `cd src-tauri && cargo check --locked` | Rust 类型与依赖检查 |
@@ -68,7 +70,8 @@
 - 构建产物：
   - macOS universal DMG
   - Windows x64 NSIS `.exe` / MSI `.msi`
-- Release Notes 由 GitHub 自动生成，先挂 draft，产物上传后发布。
+- `CHANGELOG.md` 人工维护用户可见变化；`npm run release:prepare` 负责机械的版本同步和小节转换。
+- Release workflow 会校验 tag 对应版本，并使用该版本 changelog 小节作为 Release Notes；先挂 draft，产物上传后发布。
 - 应用内更新检查请求 `https://api.github.com/repos/tingke/skill-deck/releases/latest`，仅比较版本并返回链接，不做自动下载或安装。
 
 ## 本地数据与外部边界
