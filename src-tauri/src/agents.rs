@@ -1,5 +1,5 @@
 use crate::db::{
-    now_iso, log_activity, db_agents, db_enabled_agents, AgentRow, DbState,
+    now_iso, log_activity, db_agents, AgentRow, DbState,
 };
 use rusqlite::params;
 use tauri::State;
@@ -74,11 +74,5 @@ pub fn delete_agent(db: State<DbState>, id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn agent_mcp_path(db: State<DbState>, id: String) -> Result<String, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let agent = db_enabled_agents(&conn)
-        .into_iter()
-        .find(|a| a.id == id)
-        .ok_or("agent not found")?;
-    let home = dirs::home_dir().unwrap_or_default();
-    let path = home.join(&agent.mcp_config_file);
-    Ok(path.to_string_lossy().to_string())
+    Ok(crate::agent_config::mcp_target(&conn, &id)?.path)
 }

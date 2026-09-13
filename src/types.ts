@@ -246,6 +246,30 @@ export interface PackageInput {
   configs: PackageConfigInput[];
 }
 
+export interface PackageApplyAction {
+  kind: string;
+  name: string;
+  action: string;
+  target: string;
+  detail: string;
+  blocked: boolean;
+}
+
+export interface PackageApplyPlan {
+  package_id: string;
+  package_name: string;
+  scope: string;
+  agent_id: string;
+  actions: PackageApplyAction[];
+  blocked_count: number;
+}
+
+export interface PackageExportResult {
+  zip_path: string;
+  redacted_keys: string[];
+  included_secrets: boolean;
+}
+
 // ===================== Extension (MCP / Hook / Plugin) =====================
 
 export interface AgentRow {
@@ -364,12 +388,4 @@ export interface AppInfo {
   identifier: string;
   data_dir: string;
   db_path: string;
-}
-
-export interface UpdateInfo {
-  has_update: boolean;
-  current: string;
-  latest: string;
-  url: string;
-  not_configured: boolean;
 }

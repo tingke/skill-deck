@@ -30,7 +30,7 @@
 - **Skill 接线**：以 symlink 连接或断开 Skill 与 Agent skills 目录；支持批量操作、启用/禁用 manifest、共享链接识别和显式确认。
 - **冲突安全**：区分 symlink、真实目录和真实文件；拒绝直接覆盖真实入口，支持把真实入口收纳进库源并保留连接。
 - **能力资产**：管理 Prompts、Rules、MCP、Hooks、Plugins 和 Agent 注册表。
-- **工具集/预设**：组合 Skills、MCP 与配置文件，支持应用、导入导出 `.ai-package.zip`、应用到 Agent 或项目、从项目提取。
+- **工具集/预设**：组合 Skills、MCP 与配置文件；应用 Agent 前生成变更计划，冲突和缺失默认阻断；导入导出 `.ai-package.zip`，导入会安装并审查打包 Skill；导出默认脱敏 MCP 凭证。项目应用限制配置文件名，覆盖已有配置需要显式确认。
 - **项目管理**：登记项目根目录，扫描项目 Skill 与项目配置，生成项目工具集。
 - **Agent 观察**：为 Claude Code / Codex 安装带 `skilldeck-agent-observer` 标记的观察 Hook，读取最近 500 条本地事件并展示任务、步骤和进度。
 - **本地设置**：主题、语言偏好、Agent 路径、开机启动、数据库备份恢复和数据目录打开。
@@ -61,7 +61,7 @@ src/
 └── types.ts                   # 前端共享类型
 ```
 
-数据流是 `views/components -> stores/app.ts -> lib/tauri.ts -> Tauri command -> Rust domain module -> SQLite/filesystem`。可测试的路径格式、扫描编排、确认 payload 和通知 diff 逻辑放在 `src/lib/`，避免只存在于视图组件中。
+数据流是 `views/components -> src/stores/（按领域拆分的 Zustand store）-> lib/tauri.ts -> Tauri command -> Rust domain module -> SQLite/filesystem`。可测试的路径格式、扫描编排、确认 payload 和通知 diff 逻辑放在 `src/lib/`，避免只存在于视图组件中。
 
 ### Rust / Tauri
 

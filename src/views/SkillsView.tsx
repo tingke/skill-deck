@@ -1,5 +1,8 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { useAppStore } from "../stores/app";
+import { useUiStore } from "../stores/ui";
+import { useSkillsStore } from "../stores/skills";
+import { useWorkspaceStore } from "../stores/workspace";
+import { useActivityStore } from "../stores/activity";
 import {
   Search, Folder, X, Check, Trash2,
   Tag as TagIcon, CheckSquare, Layers, Square,
@@ -29,7 +32,7 @@ const ALL = "__all__";
 const PERM_ICONS: Record<string, { icon: typeof Cpu; label: string; color: string }> = {
   "exec": { icon: Cpu, label: "可执行", color: "text-amber-500" },
   "file:write": { icon: FilePen, label: "可写入", color: "text-blue-500" },
-  "network": { icon: Globe, label: "可联网", color: "text-violet-500" },
+  "network": { icon: Globe, label: "可联网", color: "text-accent" },
 };
 
 // ---- Mini toggle (reuses .skill-toggle CSS) ----
@@ -56,7 +59,7 @@ function RailItem({
       }
     >
       <span className="truncate">{label}</span>
-      <span className={"rail-item-count " + (active ? "text-violet-500" : "")}>{count}</span>
+      <span className={"rail-item-count " + (active ? "text-accent" : "")}>{count}</span>
     </button>
   );
 }
@@ -115,14 +118,14 @@ function SkillTableRow({
       onClick={multiSelect ? onToggleCheck : onSelect}
       className={
         "skills-table-grid relative grid items-center gap-2 px-4 py-2 border-b border-border-subtle cursor-pointer transition-colors " +
-        (selected ? "bg-violet-50 dark:bg-violet-900/20" : "hover:bg-surface-hover dark:hover:bg-surface-hover") +
+        (selected ? "row-selected" : "hover:bg-surface-hover") +
         (!skill.enabled ? " opacity-50" : "")
       }
     >
-      {selected && <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-violet-500" />}
+      {selected && <div className="row-selected-bar" />}
       {multiSelect && (
         <div className="absolute left-1 top-1/2 -translate-y-1/2 pointer-events-none">
-          {checked ? <CheckSquare size={15} className="text-violet-500" /> : <Square size={15} className="text-faint" />}
+          {checked ? <CheckSquare size={15} className="text-accent" /> : <Square size={15} className="text-faint" />}
         </div>
       )}
       <div className={"flex flex-col justify-center gap-1 min-w-0 " + (multiSelect ? "pl-5" : "")}>
@@ -157,7 +160,7 @@ function SkillTableRow({
       <div className="text-center"><PermissionBadges perms={skill.permissions} /></div>
       <div className="text-center"><AuditVerdictIcon verdict={skill.audit_verdict} /></div>
       <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
-        <MiniToggle checked={skill.enabled} onChange={() => useAppStore.getState().toggleSkillEnabled(skill.id, !skill.enabled)} />
+        <MiniToggle checked={skill.enabled} onChange={() => useSkillsStore.getState().toggleSkillEnabled(skill.id, !skill.enabled)} />
       </div>
     </div>
   );
@@ -166,7 +169,7 @@ function SkillTableRow({
 // ---- Tag editor ----
 function TagEditor({ skillId, tags }: { skillId: string; tags: string[] }) {
   const t = useT();
-  const { updateTags } = useAppStore();
+  const { updateTags } = useSkillsStore();
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState("");
 
@@ -194,7 +197,7 @@ function TagEditor({ skillId, tags }: { skillId: string; tags: string[] }) {
             if (e.key === "Escape") { setText(""); setAdding(false); }
           }}
           placeholder="新标签"
-          className="px-2 py-1 text-xs border border-border-strong rounded-md focus:outline-none focus:border-violet-400 flex-1 min-w-[140px]"
+          className="px-2 py-1 text-xs border border-border-strong rounded-md focus:outline-none focus:border-accent flex-1 min-w-[140px]"
           autoFocus
         />
         <button onClick={addTag} className="p-1 text-emerald-500 hover:text-emerald-700"><Check size={14} /></button>
@@ -214,7 +217,7 @@ function TagEditor({ skillId, tags }: { skillId: string; tags: string[] }) {
         tags.map((tag) => (
           <span
             key={tag}
-            className="inline-flex items-center gap-1 text-2xs pl-2 pr-1 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-300 font-medium"
+            className="inline-flex items-center gap-1 text-2xs pl-2 pr-1 py-0.5 rounded-md bg-accent-soft text-accent font-medium"
           >
             <span className="max-w-[160px] truncate">{tag}</span>
             <button
@@ -231,7 +234,7 @@ function TagEditor({ skillId, tags }: { skillId: string; tags: string[] }) {
       )}
       <button
         onClick={() => setAdding(true)}
-        className="flex items-center gap-0.5 text-2xs text-faint hover:text-violet-600 px-1.5 py-0.5 rounded-md hover:bg-violet-50 dark:hover:bg-violet-900/20"
+        className="flex items-center gap-0.5 text-2xs text-faint hover:text-accent px-1.5 py-0.5 rounded-md hover:bg-accent-soft"
       >
         <Plus size={10} /> 新增
       </button>
@@ -284,12 +287,12 @@ function FileTree({ skillId, entries }: { skillId: string; entries: SkillFileEnt
           onClick={() => toggleFile(entry.path)}
           className={
             "w-full flex items-center gap-1 py-1 pr-2 text-xs transition-colors " +
-            (isExpanded ? "text-violet-600 dark:text-violet-300 font-semibold" : "text-muted hover:text-content")
+            (isExpanded ? "text-accent font-semibold" : "text-muted hover:text-content")
           }
           style={{ paddingLeft }}
         >
           {isExpanded ? <ChevronDown size={11} className="shrink-0" /> : <ChevronRight size={11} className="shrink-0" />}
-          <FileText size={12} className={"shrink-0 " + (isMd ? "text-violet-400" : "text-faint")} />
+          <FileText size={12} className={"shrink-0 " + (isMd ? "text-accent" : "text-faint")} />
           <span className="truncate">{entry.name}</span>
         </button>
         {isExpanded && (
@@ -330,7 +333,7 @@ function DirNode({
         style={{ paddingLeft }}
       >
         {expanded ? <ChevronDown size={11} className="shrink-0" /> : <ChevronRight size={11} className="shrink-0" />}
-        {expanded ? <FolderOpen size={12} className="shrink-0 text-violet-400" /> : <FolderClosed size={12} className="shrink-0 text-faint" />}
+        {expanded ? <FolderOpen size={12} className="shrink-0 text-accent" /> : <FolderClosed size={12} className="shrink-0 text-faint" />}
         <span className="truncate">{entry.name}</span>
       </button>
       {expanded && entry.children.map((child) => renderChildren(child, depth + 1))}
@@ -352,7 +355,7 @@ function ConnectionSummary({ connection }: { connection: SkillConnectionState })
         {connection.enabled ? "Agent 可用" : "Skill 已停用"}
       </span>
       {connection.shared && (
-        <span className="text-2xs px-1.5 py-0.5 rounded text-violet-600 bg-violet-50 dark:bg-violet-900/30 font-medium">
+        <span className="text-2xs px-1.5 py-0.5 rounded text-accent bg-accent-soft font-medium">
           共享连接：{connection.affected_agents.join("、")}
         </span>
       )}
@@ -362,7 +365,7 @@ function ConnectionSummary({ connection }: { connection: SkillConnectionState })
 
 // ---- Audit section in detail panel ----
 function SkillAuditSection({ skillId }: { skillId: string }) {
-  const { skillAudit, auditingSkill, runSkillAudit } = useAppStore();
+  const { skillAudit, auditingSkill, runSkillAudit } = useSkillsStore();
   const meta = skillAudit ? auditVerdictMeta(skillAudit.verdict) : null;
 
   return (
@@ -373,7 +376,7 @@ function SkillAuditSection({ skillId }: { skillId: string }) {
         <button
           onClick={() => runSkillAudit(skillId)}
           disabled={auditingSkill}
-          className="ml-auto flex items-center gap-1 text-2xs text-faint hover:text-violet-600 transition-colors"
+          className="ml-auto flex items-center gap-1 text-2xs text-faint hover:text-accent transition-colors"
         >
           {auditingSkill ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} 重新审查
         </button>
@@ -431,8 +434,8 @@ function SkillUpdateSection({ skill, agentOptions }: { skill: Skill; agentOption
       setResult(updateResult);
       if (updateResult.status === "updated") {
         useToastStore.getState().show(`已更新 ${updateResult.skill_name}`);
-        await useAppStore.getState().loadSkills();
-        await useAppStore.getState().loadSkillAudit(skill.id);
+        await useSkillsStore.getState().loadSkills();
+        await useSkillsStore.getState().loadSkillAudit(skill.id);
         setAvailability(null);
         setConfirming(false);
       }
@@ -458,7 +461,7 @@ function SkillUpdateSection({ skill, agentOptions }: { skill: Skill; agentOption
         <button
           onClick={runCheck}
           disabled={checking || updating}
-          className="ml-auto flex items-center gap-1 text-2xs text-faint hover:text-violet-600 transition-colors"
+          className="ml-auto flex items-center gap-1 text-2xs text-faint hover:text-accent transition-colors"
         >
           {checking ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} 检查更新
         </button>
@@ -544,8 +547,9 @@ function SkillDetail() {
   const t = useT();
   const {
     selectedSkillId, skills, agentOptions, skillConnections, skillContent, loadingContent,
-    skillFiles, librarySources, toggleConnect, adoptRealEntry,
-  } = useAppStore();
+    skillFiles, toggleConnect, adoptRealEntry,
+  } = useSkillsStore();
+  const librarySources = useWorkspaceStore((s) => s.librarySources);
   const [descExpanded, setDescExpanded] = useState(false);
   const [adoptionAgentId, setAdoptionAgentId] = useState<string | null>(null);
   const [adoptionSourceId, setAdoptionSourceId] = useState("");
@@ -581,7 +585,7 @@ function SkillDetail() {
             {skill.description.length > 120 && (
               <button
                 onClick={() => setDescExpanded(!descExpanded)}
-                className="flex items-center gap-0.5 mt-1 text-2xs text-violet-500 hover:text-violet-700"
+                className="flex items-center gap-0.5 mt-1 text-2xs text-accent hover:text-accent-hover"
               >
                 {descExpanded ? <><ChevronUp size={11} /> 收起</> : <><ChevronDown size={11} /> 展开</>}
               </button>
@@ -707,7 +711,7 @@ function SkillDetail() {
                     <button
                       data-testid="connection-path-button"
                       onClick={() => revealInFinder(connection.entry_path)}
-                      className="flex max-w-full items-center gap-1 pl-6 text-2xs text-faint transition-colors hover:text-violet-500"
+                      className="flex max-w-full items-center gap-1 pl-6 text-2xs text-faint transition-colors hover:text-accent"
                       title={`${connection.entry_path} · 在 Finder 中显示`}
                     >
                       <FolderOpen size={11} className="shrink-0" />
@@ -791,10 +795,11 @@ export default function SkillsView() {
     };
   }, []);
   const {
-   skills, agentOptions, searchQuery, setSearchQuery,
-   librarySources, selectedSkillId, selectSkill, toggleSkillEnabled,
+   skills, agentOptions, selectedSkillId, selectSkill, toggleSkillEnabled,
    requestSkillDelete, requestBatchSharedDisconnect,
- } = useAppStore();
+ } = useSkillsStore();
+ const { searchQuery, setSearchQuery } = useUiStore();
+ const librarySources = useWorkspaceStore((s) => s.librarySources);
  const selectedSkill = selectedSkillId ? skills.find((s) => s.id === selectedSkillId) ?? null : null;
 
   const [railFilter, setRailFilter] = useState<string>(ALL);
@@ -891,7 +896,7 @@ export default function SkillsView() {
           >
             <Download size={13} /> <span className="skills-toolbar-label">安装</span>
           </button>
-          <button onClick={() => useAppStore.getState().setView("presets")} className="btn btn-ghost btn-sm shrink-0" title="应用预设">
+          <button onClick={() => useUiStore.getState().setView("presets")} className="btn btn-ghost btn-sm shrink-0" title="应用预设">
             <Layers size={13} /> <span className="skills-toolbar-label">应用预设</span>
           </button>
          <div className="flex-1 min-w-0" />
@@ -899,8 +904,8 @@ export default function SkillsView() {
 
         {/* multi-select batch bar */}
         {multiSelect && (
-          <div className="flex items-center gap-2 px-4 py-2 bg-violet-50 dark:bg-violet-900/20 border-b border-border-subtle">
-            <span className="text-xs text-violet-600 dark:text-violet-300 font-medium shrink-0">
+          <div className="flex items-center gap-2 px-4 py-2 bg-accent-soft border-b border-border-subtle">
+            <span className="text-xs text-accent font-medium shrink-0 tnum">
               已选 {checkedIds.size} 个
             </span>
             <div className="flex items-center gap-1.5 ml-auto">
@@ -964,8 +969,8 @@ export default function SkillsView() {
                     console.error(error);
                     useToastStore.getState().show("批量接入失败", "error");
                   }
-                  await useAppStore.getState().loadSkills();
-                  await useAppStore.getState().loadActivity();
+                  await useSkillsStore.getState().loadSkills();
+                  await useActivityStore.getState().loadActivity();
                 }}
                 disabled={checkedIds.size === 0}
                 className="btn btn-outline btn-sm pr-2"
@@ -991,12 +996,12 @@ export default function SkillsView() {
 
                   try {
                     await batchConnect([], disconnectIds, agentId);
-                    await useAppStore.getState().loadSkills();
-                    const selectedSkillId = useAppStore.getState().selectedSkillId;
+                    await useSkillsStore.getState().loadSkills();
+                    const selectedSkillId = useSkillsStore.getState().selectedSkillId;
                     if (selectedSkillId) {
-                      await useAppStore.getState().loadSkillConnections(selectedSkillId);
+                      await useSkillsStore.getState().loadSkillConnections(selectedSkillId);
                     }
-                    await useAppStore.getState().loadActivity();
+                    await useActivityStore.getState().loadActivity();
                     useToastStore.getState().show(`已断开 ${disconnectIds.length} 个 Skill`);
                   } catch (error) {
                     const confirmation = buildBatchSharedDisconnectConfirmation(
@@ -1005,8 +1010,8 @@ export default function SkillsView() {
                       agentId,
                     );
                     if (confirmation) {
-                      await useAppStore.getState().loadSkills();
-                      const latestSkills = useAppStore.getState().skills;
+                      await useSkillsStore.getState().loadSkills();
+                      const latestSkills = useSkillsStore.getState().skills;
                       const retryIds = disconnectIds.filter((id) => {
                         const latestSkill = latestSkills.find((skill) => skill.id === id);
                         return latestSkill?.links.includes(agentId);
@@ -1018,8 +1023,8 @@ export default function SkillsView() {
                     }
                     console.error(error);
                     useToastStore.getState().show("批量断开失败", "error");
-                    await useAppStore.getState().loadSkills();
-                    await useAppStore.getState().loadActivity();
+                    await useSkillsStore.getState().loadSkills();
+                    await useActivityStore.getState().loadActivity();
                   }
                 }}
                 disabled={checkedIds.size === 0}
@@ -1046,9 +1051,18 @@ export default function SkillsView() {
         {/* skill table */}
         <div className="flex-1 overflow-y-auto bg-surface">
           {filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-faint">
-              <Folder size={36} className="opacity-30" />
-              <p className="text-sm mt-2">{skills.length === 0 ? t("skills.emptyHint") : t("skills.noMatch")}</p>
+            <div className="empty-state">
+              <div className="empty-state__icon">
+                <Folder size={22} strokeWidth={1.5} />
+              </div>
+              <p className="empty-state__title">
+                {skills.length === 0 ? t("skills.emptyHint") : t("skills.noMatch")}
+              </p>
+              {skills.length === 0 ? (
+                <p className="empty-state__hint">支持 Git 仓库、Zip 压缩包、本地目录三种安装来源</p>
+              ) : (
+                <p className="empty-state__hint">换个关键词或清除筛选条件试试</p>
+              )}
             </div>
           ) : (
             filtered.map((skill) => (
@@ -1078,7 +1092,7 @@ export default function SkillsView() {
           selectedSkill && (
             <button
               onClick={() => revealInFinder(selectedSkill.path)}
-              className="flex items-center gap-1 max-w-full hover:text-violet-500 transition-colors group"
+              className="flex items-center gap-1 max-w-full hover:text-accent transition-colors group"
               title="在 Finder 中显示"
             >
               <span className="truncate">{formatSkillPath(selectedSkill.path, homeDirectory)}</span>

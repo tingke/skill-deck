@@ -11,7 +11,7 @@ version = "0.0.2"
  tauri-build = { version = "2", features = [] }
 
  [dependencies]
- tauri = { version = "2", features = ["devtools"] }
+tauri = { version = "2", features = [] }
  serde = { version = "1", features = ["derive"] }
  serde_json = { version = "1", features = ["preserve_order"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -22,6 +22,10 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 toml = { version = "0.8", features = ["preserve_order"] }
 indexmap = "2"
 rfd = "0.15"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
- [features]
- custom-protocol = ["tauri/custom-protocol"]
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+# 显式开关：cargo build --features devtools 才会在 release 中启用 devtools。
+devtools = ["tauri/devtools"]

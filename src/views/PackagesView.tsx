@@ -1,9 +1,15 @@
 import { useState, useMemo, useEffect } from "react";
-import { useAppStore } from "../stores/app";
+import { useSkillsStore } from "../stores/skills";
+import { useAssetsStore } from "../stores/assets";
+import { useExtensionsStore } from "../stores/extensions";
+import { useWorkspaceStore } from "../stores/workspace";
+import { usePackagesStore } from "../stores/packages";
+import { useActivityStore } from "../stores/activity";
 import {
   savePkg,
   deletePkg,
   applyPkg,
+  previewPkg,
   exportPkg,
   getPackage,
   applyPkgToProject,
@@ -30,6 +36,8 @@ import type {
   PackageRow,
   PackageDetail,
   PackageInput,
+  PackageApplyPlan,
+  PackageExportResult,
   PackageSkillInput,
   PackageMcpInput,
   PackageConfigInput,
@@ -48,13 +56,22 @@ const toast = () => useToastStore.getState();
 
 export default function PackagesView() {
   const t = useT();
-  const { packages, agentOptions, skills, loadPackages } = useAppStore();
-  const { extensions, rules } = useAppStore();
+  const { packages, loadPackages } = usePackagesStore();
+  const { agentOptions, skills } = useSkillsStore();
+  const rules = useAssetsStore((s) => s.rules);
+  const extensions = useExtensionsStore((s) => s.extensions);
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detailVersion, setDetailVersion] = useState(0);
+  const [applyPlan, setApplyPlan] = useState<PackageApplyPlan | null>(null);
+  const [planApplying, setPlanApplying] = useState(false);
+  const [projectOverwrite, setProjectOverwrite] = useState<{
+    pkg: PackageRow;
+    folder: string;
+    path: string;
+  } | null>(null);
   const deleteConfirmation = useDeleteConfirmation();
   const detailPkg = detailId ? packages.find((p) => p.id === detailId) ?? null : null;
   const filtered = packages.filter(
@@ -66,11 +83,32 @@ export default function PackagesView() {
 
   const handleApply = async (pkg: PackageRow, agentId: string) => {
     try {
-      await applyPkg(pkg.id, agentId);
-      await useAppStore.getState().loadActivity();
-      toast().show(t("packages.appliedTo", { name: pkg.display_name || pkg.name, agent: agentId }));
+      setApplyPlan(await previewPkg(pkg.id, agentId));
     } catch (e) {
       toast().show(t("packages.applyFailed", { msg: String(e) }), "error");
+    }
+  };
+
+  const confirmApply = async () => {
+    if (!applyPlan || planApplying) return;
+    setPlanApplying(true);
+    try {
+      await applyPkg(applyPlan.package_id, applyPlan.agent_id);
+      await useSkillsStore.getState().loadSkills();
+      await useAssetsStore.getState().loadRules();
+      await useExtensionsStore.getState().loadExtensions();
+      await useActivityStore.getState().loadActivity();
+      toast().show(
+        t("packages.appliedTo", {
+          name: applyPlan.package_name,
+          agent: applyPlan.agent_id,
+        }),
+      );
+      setApplyPlan(null);
+    } catch (e) {
+      toast().show(t("packages.applyFailed", { msg: String(e) }), "error");
+    } finally {
+      setPlanApplying(false);
     }
   };
 
@@ -78,11 +116,37 @@ export default function PackagesView() {
     try {
       const folder = await pickFolder();
       if (!folder) return;
-      await applyPkgToProject(pkg.id, folder);
+      try {
+        await applyPkgToProject(pkg.id, folder, false);
+      } catch (applyError) {
+        const message = String(applyError);
+        if (!message.includes("CONFIRM_PROJECT_OVERWRITE:")) throw applyError;
+        setProjectOverwrite({
+          pkg,
+          folder,
+          path: message.split("CONFIRM_PROJECT_OVERWRITE:")[1] || folder,
+        });
+        return;
+      }
       const projName = folder.split("/").pop() || "untitled";
       await saveProject({ id: "", name: projName, path: folder, color: "slate", sort_order: 0, skill_count: 0, created_at: "", updated_at: "" });
-      await useAppStore.getState().loadProjects();
-      await useAppStore.getState().loadActivity();
+      await useWorkspaceStore.getState().loadProjects();
+      await useActivityStore.getState().loadActivity();
+      toast().show(t("packages.appliedToProject", { name: folder.split("/").pop() || "" }));
+    } catch (e) {
+      toast().show(t("packages.applyFailed", { msg: String(e) }), "error");
+    }
+  };
+
+  const confirmProjectOverwrite = async () => {
+    if (!projectOverwrite) return;
+    const { pkg, folder } = projectOverwrite;
+    setProjectOverwrite(null);
+    try {
+      await applyPkgToProject(pkg.id, folder, true);
+      await useSkillsStore.getState().loadSkills();
+      await useWorkspaceStore.getState().loadProjects();
+      await useActivityStore.getState().loadActivity();
       toast().show(t("packages.appliedToProject", { name: folder.split("/").pop() || "" }));
     } catch (e) {
       toast().show(t("packages.applyFailed", { msg: String(e) }), "error");
@@ -100,9 +164,13 @@ export default function PackagesView() {
     try {
       const dest = await pickSaveFolder();
       if (!dest) return;
-      const path = await exportPkg(pkg.id, dest);
-      toast().show(t("packages.exported", { name: path.split("/").pop() || "" }));
-      revealInFinder(path);
+      const result: PackageExportResult = await exportPkg(pkg.id, dest);
+      toast().show(
+        result.redacted_keys.length > 0
+          ? `${t("packages.exported", { name: result.zip_path.split("/").pop() || "" })} · ${t("packages.secretsRedacted", { count: result.redacted_keys.length })}`
+          : t("packages.exported", { name: result.zip_path.split("/").pop() || "" }),
+      );
+      revealInFinder(result.zip_path);
     } catch (e) {
       toast().show(t("packages.exportFailed", { msg: String(e) }), "error");
     }
@@ -182,6 +250,36 @@ export default function PackagesView() {
       )}
 
       <DeleteConfirmDialog controller={deleteConfirmation} testId="delete-package-dialog" />
+
+      {applyPlan && (
+        <PackageApplyPlanDialog
+          plan={applyPlan}
+          busy={planApplying}
+          onCancel={() => !planApplying && setApplyPlan(null)}
+          onConfirm={confirmApply}
+        />
+      )}
+
+      {projectOverwrite && (
+        <div
+          className="connection-dialog-overlay"
+          onMouseDown={(event) => event.target === event.currentTarget && setProjectOverwrite(null)}
+        >
+          <div role="dialog" aria-modal="true" className="connection-dialog">
+            <h3 className="connection-dialog-title">{t("packages.overwriteTitle")}</h3>
+            <p className="connection-dialog-message">{t("packages.overwriteMessage")}</p>
+            <code className="connection-dialog-path">{projectOverwrite.path}</code>
+            <div className="connection-dialog-actions">
+              <button className="btn btn-ghost btn-sm" onClick={() => setProjectOverwrite(null)}>
+                {t("common.cancel")}
+              </button>
+              <button className="btn btn-danger btn-sm" onClick={confirmProjectOverwrite}>
+                {t("packages.overwriteConfirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <PackageDetailDrawer
         pkg={detailPkg}
@@ -789,6 +887,95 @@ function McpTab({
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function PackageApplyPlanDialog({
+  plan,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  plan: PackageApplyPlan;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const t = useT();
+  const actionLabelKey = (action: string) => {
+    switch (action) {
+      case "create": return "packages.planCreate" as const;
+      case "upsert": return "packages.planUpsert" as const;
+      case "overwrite": return "packages.planOverwrite" as const;
+      case "unchanged": return "packages.planUnchanged" as const;
+      case "conflict": return "packages.planConflict" as const;
+      case "missing": return "packages.planMissing" as const;
+      default: return "packages.planUpsert" as const;
+    }
+  };
+
+  return (
+    <div
+      className="connection-dialog-overlay"
+      onMouseDown={(event) => event.target === event.currentTarget && !busy && onCancel()}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="package-apply-plan-title"
+        className="connection-dialog w-[min(680px,92vw)] max-h-[86vh] overflow-y-auto"
+      >
+        <h3 id="package-apply-plan-title" className="connection-dialog-title">
+          {plan.package_name} → {plan.agent_id}
+        </h3>
+        <p className="connection-dialog-message">{t("packages.planMessage")}</p>
+
+        <div className="space-y-1.5 mt-3">
+          {plan.actions.map((action, index) => (
+            <div
+              key={`${action.kind}-${action.name}-${index}`}
+              className={
+                "rounded-lg border p-2 text-xs " +
+                (action.blocked
+                  ? "border-red-500/30 bg-red-50 dark:bg-red-900/20"
+                  : "border-border-subtle bg-surface-2")
+              }
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-heading truncate">
+                  [{action.kind}] {action.name}
+                </span>
+                <span
+                  className={
+                    "text-2xs font-semibold shrink-0 " +
+                    (action.blocked ? "text-red-600" : "text-muted")
+                  }
+                >
+                  {t(actionLabelKey(action.action))}
+                </span>
+              </div>
+              <p className="text-2xs text-muted mt-1">{action.detail}</p>
+              <code className="block text-2xs text-faint font-mono truncate mt-0.5" title={action.target}>
+                {action.target}
+              </code>
+            </div>
+          ))}
+        </div>
+
+        <div className="connection-dialog-actions">
+          <button className="btn btn-ghost btn-sm" onClick={onCancel} disabled={busy}>
+            {t("common.cancel")}
+          </button>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={onConfirm}
+            disabled={busy || plan.blocked_count > 0}
+          >
+            {plan.blocked_count > 0 ? t("packages.planBlocked") : t("packages.planConfirm")}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

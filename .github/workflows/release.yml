@@ -25,22 +25,18 @@ jobs:
       contents: write
 
     steps:
-      - name: Check out release tag
+      - name: Check out repository
         uses: actions/checkout@v7
-        with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 20
 
       - name: Validate release tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          node scripts/verify-release.mjs "$RELEASE_TAG"
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must look like v0.1.0 or v0.1.0-rc.1: $RELEASE_TAG"
+            exit 1
+          fi
 
           if ! git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG"; then
             echo "Tag $RELEASE_TAG does not exist. Push the tag first, then re-run this workflow."
@@ -48,18 +44,9 @@ jobs:
           fi
 
           if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"; then
-            VERSION="${RELEASE_TAG#v}"
-            NOTES=$(awk -v ver="$VERSION" '
-              index($0, "## [" ver "] - ") == 1 { inside=1; next }
-              inside && /^## \[/ { exit }
-              inside { print }
-            ' CHANGELOG.md)
-
-            if [[ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]]; then
-              echo "Changelog section for $VERSION is empty."
-              exit 1
-            fi
-
+            NOTES=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+              -f tag_name="$RELEASE_TAG" \
+              --jq '.body')
             gh api "repos/$GITHUB_REPOSITORY/releases" \
               -f tag_name="$RELEASE_TAG" \
               -f name="SkillDeck $RELEASE_TAG" \
@@ -77,13 +64,26 @@ jobs:
             target: universal-apple-darwin
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             artifact: macos-universal
-            artifact-glob: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            artifact-glob: |
+              src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+              src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+              src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            rust-targets: x86_64-pc-windows-msvc
             artifact: windows-x64
             artifact-glob: |
-              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe.sig
               src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            rust-targets: x86_64-unknown-linux-gnu
+            artifact: linux-x64
+            artifact-glob: |
+              src-tauri/target/release/bundle/appimage/*.AppImage
+              src-tauri/target/release/bundle/appimage/*.AppImage.sig
+              src-tauri/target/release/bundle/deb/*.deb
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -93,6 +93,13 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -115,6 +122,9 @@ jobs:
         run: npm ci
 
       - name: Build desktop installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri:build -- --target ${{ matrix.target }}
 
       - name: Upload installer artifact
@@ -138,6 +148,44 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Generate updater manifest (latest.json)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          app_tar=(release-assets/*.app.tar.gz)
+          nsis_exe=(release-assets/*-setup.exe)
+          appimage=(release-assets/*.AppImage)
+          for required in "${app_tar[0]}" "${nsis_exe[0]}" "${appimage[0]}"; do
+            if [[ ! -f "$required" ]]; then
+              echo "Missing updater artifact: $required"
+              exit 1
+            fi
+          done
+
+          VERSION="${RELEASE_TAG#v}"
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG"
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg darwin_url "$BASE/$(basename "${app_tar[0]}")" \
+            --arg darwin_sig "$(cat "${app_tar[0]}.sig")" \
+            --arg win_url "$BASE/$(basename "${nsis_exe[0]}")" \
+            --arg win_sig "$(cat "${nsis_exe[0]}.sig")" \
+            --arg linux_url "$BASE/$(basename "${appimage[0]}")" \
+            --arg linux_sig "$(cat "${appimage[0]}.sig")" \
+            '{
+              version: $version,
+              notes: ("SkillDeck v" + $version),
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": { signature: $darwin_sig, url: $darwin_url },
+                "darwin-x86_64": { signature: $darwin_sig, url: $darwin_url },
+                "windows-x86_64": { signature: $win_sig, url: $win_url },
+                "linux-x86_64": { signature: $linux_sig, url: $linux_url }
+              }
+            }' > latest.json
+
       - name: Attach installers to draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -149,7 +197,7 @@ jobs:
             echo "No installer files were produced."
             exit 1
           fi
-          gh release upload "$RELEASE_TAG" "${files[@]}" \
+          gh release upload "$RELEASE_TAG" "${files[@]}" latest.json \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 

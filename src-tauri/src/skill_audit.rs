@@ -552,7 +552,7 @@ pub fn audit_skill_cached(
 
 // ============ Tauri commands ============
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn audit_skill(db: State<DbState>, skill_id: String) -> Result<AuditReport, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let report = audit_skill_cached(&conn, &skill_id, true)?;

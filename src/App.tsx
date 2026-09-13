@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { useAppStore } from "./stores/app";
+import { useUiStore } from "./stores/ui";
+import { useSkillsStore } from "./stores/skills";
+import { useAssetsStore } from "./stores/assets";
+import { useExtensionsStore } from "./stores/extensions";
+import { useWorkspaceStore } from "./stores/workspace";
+import { usePackagesStore } from "./stores/packages";
+import { useActivityStore } from "./stores/activity";
 import DashboardView from "./views/DashboardView";
 import SkillsView from "./views/SkillsView";
 import PackagesView from "./views/PackagesView";
@@ -23,19 +29,20 @@ import type { ViewKey } from "./types";
 import { useT } from "./i18n";
 
 export default function App() {
-  const { view, setView, loadSkills } = useAppStore();
-  const theme = useAppStore((s) => s.theme);
-  const setTheme = useAppStore((s) => s.setTheme);
-  const globalScan = useAppStore((s) => s.globalScan);
-  const globalScanning = useAppStore((s) => s.globalScanning);
-  const connectionConfirmation = useAppStore((s) => s.connectionConfirmation);
-  const connectionConfirming = useAppStore((s) => s.connectionConfirming);
-  const cancelSharedDisconnect = useAppStore((s) => s.cancelSharedDisconnect);
-  const confirmSharedDisconnect = useAppStore((s) => s.confirmSharedDisconnect);
-  const skillDeleteConfirmation = useAppStore((s) => s.skillDeleteConfirmation);
-  const skillDeleting = useAppStore((s) => s.skillDeleting);
-  const cancelSkillDelete = useAppStore((s) => s.cancelSkillDelete);
-  const confirmSkillDelete = useAppStore((s) => s.confirmSkillDelete);
+  const { view, setView } = useUiStore();
+  const loadSkills = useSkillsStore((s) => s.loadSkills);
+  const theme = useUiStore((s) => s.theme);
+  const setTheme = useUiStore((s) => s.setTheme);
+  const globalScan = useSkillsStore((s) => s.globalScan);
+  const globalScanning = useSkillsStore((s) => s.globalScanning);
+  const connectionConfirmation = useSkillsStore((s) => s.connectionConfirmation);
+  const connectionConfirming = useSkillsStore((s) => s.connectionConfirming);
+  const cancelSharedDisconnect = useSkillsStore((s) => s.cancelSharedDisconnect);
+  const confirmSharedDisconnect = useSkillsStore((s) => s.confirmSharedDisconnect);
+  const skillDeleteConfirmation = useSkillsStore((s) => s.skillDeleteConfirmation);
+  const skillDeleting = useSkillsStore((s) => s.skillDeleting);
+  const cancelSkillDelete = useSkillsStore((s) => s.cancelSkillDelete);
+  const confirmSkillDelete = useSkillsStore((s) => s.confirmSkillDelete);
   const [navExpanded, setNavExpanded] = useState(() => window.innerWidth >= 1100);
 
   useEffect(() => {
@@ -65,18 +72,18 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      await useAppStore.getState().bootstrapScan();
-      await useAppStore.getState().loadAgentOptions();
-      await useAppStore.getState().verifyConnections();
+      await useSkillsStore.getState().bootstrapScan();
+      await useSkillsStore.getState().loadAgentOptions();
+      await useSkillsStore.getState().verifyConnections();
       await loadSkills();
-      await useAppStore.getState().loadPrompts();
-      await useAppStore.getState().loadRules();
-      await useAppStore.getState().loadActivity();
-      await useAppStore.getState().loadPackages();
-     await useAppStore.getState().loadExtensions();
-     await useAppStore.getState().loadAgents();
-     await useAppStore.getState().loadProjects();
-      await useAppStore.getState().loadLibrarySources();
+      await useAssetsStore.getState().loadPrompts();
+      await useAssetsStore.getState().loadRules();
+      await useActivityStore.getState().loadActivity();
+      await usePackagesStore.getState().loadPackages();
+      await useExtensionsStore.getState().loadExtensions();
+      await useWorkspaceStore.getState().loadAgents();
+      await useWorkspaceStore.getState().loadProjects();
+      await useWorkspaceStore.getState().loadLibrarySources();
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -249,7 +256,13 @@ function Sidebar({
   expanded: boolean;
 }) {
 const t = useT();
- const { skills, prompts, rules, packages, extensions, agents, projects } = useAppStore();
+ const skills = useSkillsStore((s) => s.skills);
+ const prompts = useAssetsStore((s) => s.prompts);
+ const rules = useAssetsStore((s) => s.rules);
+ const packages = usePackagesStore((s) => s.packages);
+ const extensions = useExtensionsStore((s) => s.extensions);
+ const agents = useWorkspaceStore((s) => s.agents);
+ const projects = useWorkspaceStore((s) => s.projects);
 const items: { key: ViewKey; label: string; icon: React.ReactNode; badge?: number }[] = [
    { key: "dashboard", label: t("nav.dashboard"), icon: <LayoutDashboard size={17} /> },
    { key: "agents", label: t("nav.agents"), icon: <Cpu size={17} />, badge: agents.length },
@@ -310,7 +323,7 @@ const items: { key: ViewKey; label: string; icon: React.ReactNode; badge?: numbe
        >
          <SettingsIcon size={17} />
          {expanded && <span className="truncate">{t("nav.settings")}</span>}
-        {expanded && <span className="ml-auto text-2xs font-mono opacity-60">v0.0.2</span>}
+        {expanded && <span className="ml-auto text-2xs font-mono opacity-70">v0.0.2</span>}
      </button>
     </div>
     </aside>

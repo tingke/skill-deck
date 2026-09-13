@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useAppStore } from "../stores/app";
+import { useExtensionsStore } from "../stores/extensions";
 import {
   deleteExt,
   extConfigPath,
@@ -22,8 +22,8 @@ const toast = () => useToastStore.getState();
 
 export default function HooksView() {
   const t = useT();
-  const { loadExtensions } = useAppStore();
-  const allExtensions = useAppStore((s) => s.extensions);
+  const { loadExtensions } = useExtensionsStore();
+  const allExtensions = useExtensionsStore((s) => s.extensions);
   const extensions = useMemo(
     () =>
       allExtensions.filter(
@@ -66,7 +66,7 @@ export default function HooksView() {
         current.map((item) => (item.agent === status.agent ? next : item)),
       );
       const extensions = await scanExt();
-      useAppStore.setState({ extensions });
+      useExtensionsStore.setState({ extensions });
       toast().show(next.installed ? t("hooks.observerEnabled", { agent: status.agent }) : t("hooks.observerDisabled", { agent: status.agent }), "info");
     } catch (error) {
       toast().show(t("hooks.observerToggleFailed", { msg: String(error) }), "error");
@@ -77,14 +77,14 @@ export default function HooksView() {
 
   const handleToggle = async (ext: ExtensionRow) => {
     const next = !ext.enabled;
-    useAppStore.setState((s) => ({
+    useExtensionsStore.setState((s) => ({
       extensions: s.extensions.map((e) => (e.id === ext.id ? { ...e, enabled: next } : e)),
     }));
     try {
       await toggleExt(ext.id, next);
       toast().show(next ? t("ext.enabled") : t("ext.disabled"), "info");
     } catch (e) {
-      useAppStore.setState((s) => ({
+      useExtensionsStore.setState((s) => ({
         extensions: s.extensions.map((e) => (e.id === ext.id ? { ...e, enabled: !next } : e)),
       }));
       toast().show(t("common.operationFailed") + ": " + e, "error");
@@ -183,7 +183,7 @@ function HookModal({ existing, t, onClose, onDone }: { existing: ExtensionRow | 
       onDone();
     } catch (e) {
       toast().show(t(isEdit ? "hooks.updateFailed" : "hooks.addFailed", { msg: String(e) }), "error");
-      if (existing) await useAppStore.getState().loadExtensions();
+      if (existing) await useExtensionsStore.getState().loadExtensions();
     }
   };
 

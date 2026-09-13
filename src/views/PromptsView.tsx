@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useAppStore } from "../stores/app";
+import { useAssetsStore } from "../stores/assets";
 import { savePrompt, deletePrompt, saveRule } from "../lib/tauri";
 import { Plus, Trash2, X, Search, FileText, Copy, Check, ScrollText, Edit3 } from "lucide-react";
 import type { Prompt } from "../types";
@@ -13,8 +13,7 @@ const toast = () => useToastStore.getState();
 
 export default function PromptsView() {
   const t = useT();
-  const { prompts, loadPrompts } = useAppStore();
-  const { loadRules } = useAppStore();
+  const { prompts, loadPrompts, loadRules } = useAssetsStore();
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Prompt | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);

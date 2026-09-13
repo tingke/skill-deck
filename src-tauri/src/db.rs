@@ -86,7 +86,15 @@ pub fn open() -> Connection {
     conn
 }
 
-fn migrate(conn: &Connection) {
+/// 测试用的内存数据库：与 `open()` 相同的 schema 迁移，不触碰真实数据目录。
+#[cfg(test)]
+pub(crate) fn open_in_memory() -> Connection {
+    let conn = Connection::open_in_memory().unwrap();
+    migrate(&conn);
+    conn
+}
+
+pub(crate) fn migrate(conn: &Connection) {
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS skills (

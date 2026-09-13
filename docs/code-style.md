@@ -33,7 +33,7 @@
 
 - 视图组件不直接散落 `invoke("...")`；新增 API 先在 `src/lib/tauri.ts` 建类型化包装。
 - 可纯化的业务规则（路径显示、扫描编排、确认 payload、通知 diff、批量选择）放 `src/lib/` 并加 Node 测试。
-- 跨页面状态进 `src/stores/app.ts`；组件内部 UI 状态用 `useState`。
+- 跨页面状态按领域拆在 `src/stores/`：`ui.ts`（视图/搜索/主题）、`skills.ts`（Skill 列表、连接、详情与确认流）、`assets.ts`（Prompts/Rules）、`extensions.ts`、`workspace.ts`（Agents/Projects/LibrarySources）、`packages.ts`、`activity.ts`。新增状态先判断归属领域，不要回流成单一 god store；组件内部 UI 状态用 `useState`。
 - 危险操作使用显式 pending confirmation 对象和确认对话框，不使用 `confirm()` 或字符串状态模拟。
 - 异步操作要防止重复提交；确认执行中用 `connectionConfirming`、`skillDeleting` 这类 in-flight 标志。
 - 保留布局契约依赖的 `data-testid` 和 `data-tauri-drag-region`。

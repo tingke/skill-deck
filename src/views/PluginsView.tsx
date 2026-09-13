@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useAppStore } from "../stores/app";
+import { useExtensionsStore } from "../stores/extensions";
 import { togglePlugin, deleteExt, extConfigPath } from "../lib/tauri";
 import { Package as PackageIcon } from "lucide-react";
 import type { ExtensionRow } from "../types";
@@ -12,8 +12,8 @@ const toast = () => useToastStore.getState();
 
 export default function PluginsView() {
   const t = useT();
-  const { loadExtensions } = useAppStore();
-  const allExtensions = useAppStore((s) => s.extensions);
+  const { loadExtensions } = useExtensionsStore();
+  const allExtensions = useExtensionsStore((s) => s.extensions);
   const extensions = useMemo(
     () => allExtensions.filter((e) => e.kind === "plugin"),
     [allExtensions],
@@ -34,7 +34,7 @@ export default function PluginsView() {
 
   const handleToggle = async (ext: ExtensionRow) => {
     const next = !ext.enabled;
-    useAppStore.setState((s) => ({
+    useExtensionsStore.setState((s) => ({
       extensions: s.extensions.map((e) => (e.id === ext.id ? { ...e, enabled: next } : e)),
     }));
     try {
@@ -43,7 +43,7 @@ export default function PluginsView() {
       await togglePlugin({ name: ext.name, marketplace: cfg.marketplace || "", enabled: next });
       toast().show(next ? t("ext.enabled") : t("ext.disabled"), "info");
     } catch (e) {
-      useAppStore.setState((s) => ({
+      useExtensionsStore.setState((s) => ({
         extensions: s.extensions.map((e) => (e.id === ext.id ? { ...e, enabled: !next } : e)),
       }));
       toast().show(t("common.operationFailed") + ": " + e, "error");

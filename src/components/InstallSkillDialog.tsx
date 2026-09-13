@@ -3,7 +3,8 @@ import { Download, GitBranch, FolderInput, Package, Loader2, TriangleAlert } fro
 import type { InstallResult, LibrarySource, SkillSourceKind } from "../types";
 import { installSkill } from "../lib/tauri";
 import { INSTALL_STATUS_META, needsUserConfirm } from "../lib/skillAudit";
-import { useAppStore } from "../stores/app";
+import { useSkillsStore } from "../stores/skills";
+import { useActivityStore } from "../stores/activity";
 import { useToastStore } from "../stores/toast";
 import AuditFindings from "./AuditFindings";
 
@@ -57,8 +58,8 @@ export default function InstallSkillDialog({
       setResult(installResult);
       if (installResult.status === "installed") {
         useToastStore.getState().show(`已安装 ${installResult.skill_name}`);
-        await useAppStore.getState().loadSkills();
-        await useAppStore.getState().loadActivity();
+        await useSkillsStore.getState().loadSkills();
+        await useActivityStore.getState().loadActivity();
         onClose();
       }
     } catch (error) {

@@ -3,7 +3,10 @@ use crate::db::{
     PackageDetail, PackageInput, PackageMcpEntry, PackageMcpInput, PackageRow,
     PackageSkillEntry, PackageSkillInput, DbState,
 };
+use crate::agent_config;
+use crate::skill_connections;
 use rusqlite::{params, Connection};
+use serde::Serialize;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -50,6 +53,66 @@ fn pretty_json(raw: &str) -> String {
         .ok()
         .and_then(|v| serde_json::to_string_pretty(&v).ok())
         .unwrap_or_else(|| raw.to_string())
+}
+
+fn canonical_json(value: &str) -> serde_json::Value {
+    serde_json::from_str(value).unwrap_or(serde_json::Value::Null)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PackageApplyAction {
+    pub kind: String,
+    pub name: String,
+    pub action: String,
+    pub target: String,
+    pub detail: String,
+    pub blocked: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PackageApplyPlan {
+    pub package_id: String,
+    pub package_name: String,
+    pub scope: String,
+    pub agent_id: String,
+    pub actions: Vec<PackageApplyAction>,
+    pub blocked_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PackageExportResult {
+    pub zip_path: String,
+    pub redacted_keys: Vec<String>,
+    pub included_secrets: bool,
+}
+
+fn sensitive_env_key(key: &str) -> bool {
+    let key = key.to_ascii_uppercase();
+    ["TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "API_KEY", "ACCESS_KEY"]
+        .iter()
+        .any(|marker| key.contains(marker))
+        || key.ends_with("_KEY")
+}
+
+/// Redact top-level MCP `env` values. Command args and URLs are not treated as
+/// secret stores; they are left intact for functional package import.
+fn redact_mcp_config(raw: &str) -> Result<(String, Vec<String>), String> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|error| error.to_string())?;
+    let mut redacted = Vec::new();
+    let Some(object) = value.as_object_mut() else {
+        return Err("MCP server 配置必须是 JSON 对象".to_string());
+    };
+    if let Some(env) = object.get_mut("env").and_then(|value| value.as_object_mut()) {
+        for (key, item) in env.iter_mut() {
+            if sensitive_env_key(key) && item.is_string() {
+                *item = serde_json::Value::String(format!("${{{}}}", key));
+                redacted.push(key.clone());
+            }
+        }
+    }
+    Ok((value.to_string(), redacted))
 }
 
 // ============ list / get ============
@@ -256,129 +319,292 @@ pub fn delete_package(conn: &Connection, id: &str) -> Result<(), String> {
 
 // ============ apply ============
 
-/// 把 package 落地到指定 runtime：skill 建 symlink、mcp 写入配置、config 写回文件
-pub fn apply_package(conn: &Connection, package_id: &str, runtime: &str) -> Result<(), String> {
-    let detail = get_package_detail(conn, package_id)
-        .ok_or_else(|| "package not found".to_string())?;
-    let idx = skill_index(conn);
+fn skill_source_path(conn: &Connection, entry: &PackageSkillEntry) -> Option<PathBuf> {
+    let source = if let Some(skill_id) = entry.skill_id.as_deref() {
+        conn.query_row(
+            "SELECT path FROM skills WHERE id = ?1",
+            params![skill_id],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+    } else {
+        skill_index(conn).get(&entry.name).map(|(_, path)| path.clone())
+    };
+    source
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+}
 
-    // skills: 建 symlink 到 runtime skills 目录
-    let skills_dir = crate::commands::runtime_skills_dir(runtime, conn);
-    fs::create_dir_all(&skills_dir).ok();
-    for s in &detail.skills {
-        let src_path = if let Some(ref sid) = s.skill_id {
-            conn.query_row(
-                "SELECT path FROM skills WHERE id=?1",
-                params![sid],
-                |row| row.get::<_, String>(0),
-            )
-            .ok()
+fn package_skill_id(conn: &Connection, entry: &PackageSkillEntry) -> Option<String> {
+    if let Some(skill_id) = entry.skill_id.as_deref().filter(|value| !value.is_empty()) {
+        return Some(skill_id.to_string());
+    }
+    let source = skill_source_path(conn, entry)?;
+    conn.query_row(
+        "SELECT id FROM skills WHERE path = ?1 LIMIT 1",
+        params![source.to_string_lossy()],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+}
+
+fn skill_apply_action(
+    conn: &Connection,
+    entry: &PackageSkillEntry,
+    skills_dir: &Path,
+) -> PackageApplyAction {
+    let missing = PackageApplyAction {
+        kind: "skill".into(),
+        name: entry.name.clone(),
+        action: "missing".into(),
+        target: entry.source_path.clone(),
+        detail: "Skill 不在当前库中".into(),
+        blocked: true,
+    };
+    let Some(source) = skill_source_path(conn, entry) else {
+        return missing;
+    };
+    let Ok(canonical_source) = fs::canonicalize(&source) else {
+        return PackageApplyAction {
+            kind: "skill".into(),
+            name: entry.name.clone(),
+            action: "missing".into(),
+            target: source.to_string_lossy().to_string(),
+            detail: "Skill 源目录不存在".into(),
+            blocked: true,
+        };
+    };
+    let Some(entry_name) = canonical_source.file_name() else {
+        return missing;
+    };
+    let target = skills_dir.join(entry_name);
+    let metadata = fs::symlink_metadata(&target);
+    let (action, detail, blocked) = if metadata
+        .as_ref()
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        if fs::canonicalize(&target).ok().as_ref() == Some(&canonical_source) {
+            ("unchanged", "已指向该 Skill", false)
         } else {
-            idx.get(&s.name).map(|(_, p)| p.clone())
-        };
-        let src = match src_path {
-            Some(p) if !p.is_empty() => PathBuf::from(p),
-            _ => continue,
-        };
-        let dir_name = src
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| s.name.clone());
-        let sym = skills_dir.join(&dir_name);
-        if sym.exists() || sym.is_symlink() {
-            if sym.is_symlink() {
-                fs::remove_file(&sym).ok();
+            ("conflict", "已存在指向不同目标的软链", true)
+        }
+    } else if metadata.is_ok() {
+        ("conflict", "真实目录或文件不能被覆盖", true)
+    } else {
+        ("create", "将创建软链", false)
+    };
+    PackageApplyAction {
+        kind: "skill".into(),
+        name: entry.name.clone(),
+        action: action.into(),
+        target: target.to_string_lossy().to_string(),
+        detail: detail.into(),
+        blocked,
+    }
+}
+
+fn config_apply_action(target: &Path, content: &str, kind: &str, name: &str) -> PackageApplyAction {
+    match fs::read_to_string(target) {
+        Ok(existing) if existing == content => PackageApplyAction {
+            kind: kind.into(),
+            name: name.into(),
+            action: "unchanged".into(),
+            target: target.to_string_lossy().to_string(),
+            detail: "内容一致".into(),
+            blocked: false,
+        },
+        Ok(_) => PackageApplyAction {
+            kind: kind.into(),
+            name: name.into(),
+            action: "overwrite".into(),
+            target: target.to_string_lossy().to_string(),
+            detail: "将覆盖现有文件".into(),
+            blocked: false,
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => PackageApplyAction {
+            kind: kind.into(),
+            name: name.into(),
+            action: "create".into(),
+            target: target.to_string_lossy().to_string(),
+            detail: "将创建文件".into(),
+            blocked: false,
+        },
+        Err(error) => PackageApplyAction {
+            kind: kind.into(),
+            name: name.into(),
+            action: "conflict".into(),
+            target: target.to_string_lossy().to_string(),
+            detail: format!("无法读取现有文件: {}", error),
+            blocked: true,
+        },
+    }
+}
+
+pub fn preview_package_apply(
+    conn: &Connection,
+    package_id: &str,
+    runtime: &str,
+) -> Result<PackageApplyPlan, String> {
+    let detail = get_package_detail(conn, package_id).ok_or("package not found")?;
+    let agent = agent_config::agent_by_id(conn, runtime)?;
+    let skills_dir = skill_connections::configured_agent_skills_path(conn, &agent);
+    let mut actions = Vec::new();
+
+    for entry in &detail.skills {
+        actions.push(skill_apply_action(conn, entry, &skills_dir));
+    }
+    let target = agent_config::mcp_target(conn, runtime)?;
+    let existing = agent_config::read_mcp_entries(&target)?;
+    for entry in &detail.mcps {
+        let unchanged = existing
+            .iter()
+            .any(|(name, config)| name == &entry.name && canonical_json(config) == canonical_json(&entry.config_json));
+        actions.push(PackageApplyAction {
+            kind: "mcp".into(),
+            name: entry.name.clone(),
+            action: if unchanged { "unchanged".into() } else { "upsert".into() },
+            target: target.path.clone(),
+            detail: if unchanged {
+                "MCP 配置一致".into()
             } else {
-                continue;
-            }
-        }
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&src, &sym).ok();
-        }
+                format!("将写入 {}", target.path)
+            },
+            blocked: false,
+        });
     }
-
-    // mcps: 合并写入 runtime 的 mcp 配置
-    for m in &detail.mcps {
-        write_mcp_entry(runtime, &m.name, &m.config_json)?;
-    }
-
-    // configs: 写回 runtime 对应全局指令文件
-    for c in &detail.configs {
-        if c.agent != runtime {
+    for entry in &detail.configs {
+        if entry.agent != runtime {
             continue;
         }
-        let target = global_config_path(runtime, &c.file_name);
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).ok();
+        match agent_config::global_config_target(conn, runtime, &entry.file_name) {
+            Ok(target) => actions.push(config_apply_action(&target, &entry.content, "config", &entry.file_name)),
+            Err(error) => actions.push(PackageApplyAction {
+                kind: "config".into(),
+                name: entry.file_name.clone(),
+                action: "conflict".into(),
+                target: entry.file_name.clone(),
+                detail: error,
+                blocked: true,
+            }),
         }
-        fs::write(&target, &c.content).map_err(|e| e.to_string())?;
+    }
+    let blocked_count = actions.iter().filter(|action| action.blocked).count();
+    Ok(PackageApplyPlan {
+        package_id: detail.id,
+        package_name: detail.name,
+        scope: "agent".into(),
+        agent_id: runtime.to_string(),
+        actions,
+        blocked_count,
+    })
+}
+
+pub fn apply_package(conn: &Connection, package_id: &str, runtime: &str) -> Result<(), String> {
+    let plan = preview_package_apply(conn, package_id, runtime)?;
+    if plan.blocked_count > 0 {
+        let blocked = plan
+            .actions
+            .iter()
+            .filter(|action| action.blocked)
+            .map(|action| format!("{}: {}", action.name, action.detail))
+            .collect::<Vec<_>>()
+            .join("；");
+        return Err(format!("APPLY_BLOCKED:{}", blocked));
+    }
+
+    let detail = get_package_detail(conn, package_id).ok_or("package not found")?;
+    let agent = agent_config::agent_by_id(conn, runtime)?;
+    for entry in &detail.skills {
+        let action = skill_apply_action(conn, entry, &skill_connections::configured_agent_skills_path(conn, &agent));
+        if action.action != "missing" {
+            let Some(skill_id) = package_skill_id(conn, entry) else {
+                return Err(format!("无法确定 Skill ID: {}", entry.name));
+            };
+            skill_connections::connect_skill_connection(conn, &skill_id, runtime)?;
+        }
+    }
+
+    let target = agent_config::mcp_target(conn, runtime)?;
+    for entry in &detail.mcps {
+        agent_config::upsert_mcp_entry(&target, &entry.name, &entry.config_json, None, false)?;
+    }
+
+    let mut rollback: Vec<(PathBuf, Option<Vec<u8>>)> = Vec::new();
+    for entry in &detail.configs {
+        if entry.agent != runtime {
+            continue;
+        }
+        let target = agent_config::global_config_target(conn, runtime, &entry.file_name)?;
+        let old = if target.exists() {
+            Some(fs::read(&target).map_err(|error| error.to_string())?)
+        } else {
+            None
+        };
+        match agent_config::atomic_write(&target, entry.content.as_bytes()) {
+            Ok(()) => rollback.push((target, old)),
+            Err(error) => {
+                for (path, old) in rollback.iter().rev() {
+                    match old {
+                        Some(bytes) => {
+                            let _ = fs::write(path, bytes);
+                        }
+                        None => {
+                            let _ = fs::remove_file(path);
+                        }
+                    }
+                }
+                return Err(format!("写入配置失败，已回滚本次配置文件: {}", error));
+            }
+        }
     }
 
     log_activity(conn, "package_apply", &format!("{} -> {}", detail.name, runtime));
     Ok(())
 }
 
-fn global_config_path(runtime: &str, file_name: &str) -> PathBuf {
-    let dir = match runtime {
-        "claude" => home().join(".claude"),
-        "codex" => home().join(".codex"),
-        "trae" => home().join(".trae-cn"),
-        _ => home().join(format!(".{}", runtime)),
-    };
-    dir.join(file_name)
-}
-
-fn mcp_config_path(runtime: &str) -> PathBuf {
-    match runtime {
-        "claude" => home().join(".claude").join("mcp.json"),
-        "codex" => home().join(".codex").join("mcp.json"),
-        "trae" => home().join(".trae-cn").join("mcp.json"),
-        _ => home().join(format!(".{}", runtime)).join("mcp.json"),
-    }
-}
-
-fn write_mcp_entry(runtime: &str, name: &str, config_json: &str) -> Result<(), String> {
-    let cfg_path = mcp_config_path(runtime);
-    let mut root: serde_json::Value = if cfg_path.exists() {
-        let raw = fs::read_to_string(&cfg_path).unwrap_or_default();
-        serde_json::from_str(&raw).unwrap_or_else(|_| serde_json::json!({ "mcpServers": {} }))
-    } else {
-        serde_json::json!({ "mcpServers": {} })
-    };
-    let entry: serde_json::Value =
-        serde_json::from_str(config_json).unwrap_or_else(|_| serde_json::json!({}));
-    if let Some(servers) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
-        servers.insert(name.to_string(), entry);
-    }
-    if let Some(parent) = cfg_path.parent() {
-        fs::create_dir_all(parent).ok();
-    }
-    let out = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
-    fs::write(&cfg_path, out).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 // ============ export (manifest.yaml + zip) ============
 
-/// 把 package 导出为 ai-package-spec-v0.1 目录结构并打包成 zip，返回 zip 绝对路径。
-pub fn export_package_zip(conn: &Connection, package_id: &str) -> Result<String, String> {
-    export_package_zip_to(conn, package_id, None)
+/// 把 package 导出为 ai-package-spec-v0.1 目录结构并打包成 zip，默认脱敏 MCP env。
+pub fn export_package_zip(
+    conn: &Connection,
+    package_id: &str,
+) -> Result<PackageExportResult, String> {
+    export_package_zip_to(conn, package_id, None, false)
 }
 
-/// 同 export_package_zip，但允许指定输出目录
-pub fn export_package_zip_to(conn: &Connection, package_id: &str, dest_dir: Option<&str>) -> Result<String, String> {
+/// 同 export_package_zip，但允许指定输出目录和是否保留真实凭证。
+pub fn export_package_zip_to(
+    conn: &Connection,
+    package_id: &str,
+    dest_dir: Option<&str>,
+    include_secrets: bool,
+) -> Result<PackageExportResult, String> {
+    export_package_zip_to_dirs(
+        conn,
+        package_id,
+        &home().join(".ai-capability-manager").join("exports"),
+        dest_dir,
+        include_secrets,
+    )
+}
+
+fn export_package_zip_to_dirs(
+    conn: &Connection,
+    package_id: &str,
+    staging_root: &Path,
+    dest_dir: Option<&str>,
+    include_secrets: bool,
+) -> Result<PackageExportResult, String> {
     let d = get_package_detail(conn, package_id)
         .ok_or_else(|| "package not found".to_string())?;
 
     let stamp = now_iso();
-    let out_dir = home()
-        .join(".ai-capability-manager")
-        .join("exports")
-        .join(format!("{}-{}", sanitize(&d.name), stamp));
+    let out_dir = staging_root.join(format!("{}-{}", sanitize(&d.name), stamp));
     fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
 
     let mut components_yaml = String::new();
+    let mut redacted_keys = Vec::new();
 
     // skills/<name>/
     if !d.skills.is_empty() {
@@ -418,7 +644,14 @@ pub fn export_package_zip_to(conn: &Connection, package_id: &str, dest_dir: Opti
         for m in &d.mcps {
             let fname = format!("{}.json", sanitize(&m.name));
             let dst = mcp_root.join(&fname);
-            fs::write(&dst, pretty_json(&m.config_json)).map_err(|e| e.to_string())?;
+            let (config_json, keys) = if include_secrets {
+                (pretty_json(&m.config_json), Vec::new())
+            } else {
+                let (redacted, keys) = redact_mcp_config(&m.config_json)?;
+                (pretty_json(&redacted), keys)
+            };
+            redacted_keys.extend(keys.iter().map(|key| format!("{}.env.{}", m.name, key)));
+            fs::write(&dst, config_json).map_err(|e| e.to_string())?;
             components_yaml.push_str(&format!(
                 "  - type: mcp\n    name: \"{}\"\n    path: mcp/{}\n",
                 yaml_escape(&m.name), fname
@@ -474,7 +707,11 @@ pub fn export_package_zip_to(conn: &Connection, package_id: &str, dest_dir: Opti
     zipper.finish().map_err(|e| e.to_string())?;
 
     log_activity(conn, "package_export", &d.name);
-    Ok(zip_path.to_string_lossy().to_string())
+    Ok(PackageExportResult {
+        zip_path: zip_path.to_string_lossy().to_string(),
+        redacted_keys,
+        included_secrets: include_secrets,
+    })
 }
 
 fn yaml_escape(s: &str) -> String {
@@ -520,16 +757,107 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+struct TempImportDir(PathBuf);
+
+impl TempImportDir {
+    fn new(label: &str) -> Result<Self, String> {
+        let path = std::env::temp_dir().join(format!(
+            "skilldeck-package-{}-{}",
+            label,
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for TempImportDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn validate_zip_name(name: &str) -> Result<(), String> {
+    let path = Path::new(name);
+    if path.is_absolute() {
+        return Err(format!("压缩包包含绝对路径条目: {}", name));
+    }
+    if path
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(format!("压缩包包含非法路径条目: {}", name));
+    }
+    Ok(())
+}
+
+fn extract_zip_directory<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    directory: &str,
+    destination: &Path,
+) -> Result<(), String> {
+    let prefix = if directory.ends_with('/') {
+        directory.to_string()
+    } else {
+        format!("{}/", directory)
+    };
+    validate_zip_name(directory.trim_end_matches('/'))?;
+    let mut found = false;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        let name = entry.name().to_string();
+        validate_zip_name(&name)?;
+        let Some(relative) = name.strip_prefix(&prefix) else {
+            continue;
+        };
+        found = true;
+        if relative.is_empty() {
+            continue;
+        }
+        validate_zip_name(relative)?;
+        let target = destination.join(relative);
+        if entry.is_dir() {
+            fs::create_dir_all(&target).map_err(|error| error.to_string())?;
+        } else {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            let mut output = fs::File::create(&target).map_err(|error| error.to_string())?;
+            std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
+        }
+    }
+    if !found {
+        return Err(format!("压缩包缺少组件目录: {}", directory));
+    }
+    Ok(())
+}
+
+fn bundled_skill_root(directory: &Path) -> Result<PathBuf, String> {
+    if directory.join("SKILL.md").is_file()
+        || directory.join("SKILL.md.disabled").is_file()
+    {
+        return Ok(directory.to_path_buf());
+    }
+    Err(format!(
+        "压缩包 Skill 缺少 SKILL.md: {}",
+        directory.to_string_lossy()
+    ))
+}
+
 // ============ import ============
 
 /// 从 AI Package zip 导入：解析 manifest + 组件，落库为 package。
 /// manifest 兼容 YAML 与 JSON 两种形式（用最小解析器抽取顶层字段）。
-pub fn import_package_zip(conn: &Connection, zip_path: &str) -> Result<String, String> {
+pub fn import_package_zip(
+    conn: &Connection,
+    zip_path: &str,
+    library_source_id: Option<&str>,
+    override_audit: bool,
+) -> Result<String, String> {
     let file = fs::File::open(zip_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
 
     let mut manifest_raw = String::new();
-    let mut manifest_ext = String::new();
     let mut found = false;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
@@ -538,7 +866,6 @@ pub fn import_package_zip(conn: &Connection, zip_path: &str) -> Result<String, S
             || name.ends_with("manifest.json")
         {
             entry.read_to_string(&mut manifest_raw).map_err(|e| e.to_string())?;
-            manifest_ext = if name.ends_with(".json") { "json".into() } else { "yaml".into() };
             found = true;
             break;
         }
@@ -546,20 +873,29 @@ pub fn import_package_zip(conn: &Connection, zip_path: &str) -> Result<String, S
     if !found {
         return Err("zip 内未找到 manifest.yaml / manifest.json".into());
     }
-
-    // JSON manifest
-    if manifest_ext == "json" {
-        if let Ok(_) = serde_json::from_str::<serde_json::Value>(&manifest_raw) {
-            let (name, display_name, version, description, components) =
-                parse_manifest(&manifest_raw)?;
-            return build_package_from_components(conn, &mut archive, &name, &display_name, &version, &description, &components);
-        }
-    }
+    let library_source_id = match library_source_id.filter(|value| !value.trim().is_empty()) {
+        Some(id) => id.to_string(),
+        None => conn
+            .query_row(
+                "SELECT id FROM library_sources WHERE enabled = 1 ORDER BY sort_order, id LIMIT 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|_| "没有可用库源，无法导入打包 Skill".to_string())?,
+    };
 
     let (name, display_name, version, description, components) =
         parse_manifest(&manifest_raw)?;
     let id = build_package_from_components(
-        conn, &mut archive, &name, &display_name, &version, &description, &components,
+        conn,
+        &mut archive,
+        &name,
+        &display_name,
+        &version,
+        &description,
+        &components,
+        &library_source_id,
+        override_audit,
     )?;
     log_activity(conn, "package_import", &name);
     Ok(id)
@@ -574,8 +910,13 @@ fn build_package_from_components<R: Read + std::io::Seek>(
     version: &str,
     description: &str,
     components: &[ManifestComponent],
+    library_source_id: &str,
+    override_audit: bool,
 ) -> Result<String, String> {
-    let idx = skill_index(conn);
+    let transaction = conn
+        .unchecked_transaction()
+        .map_err(|error| error.to_string())?;
+    let idx = skill_index(&transaction);
     let mut skills: Vec<PackageSkillInput> = Vec::new();
     let mut mcps: Vec<PackageMcpInput> = Vec::new();
     let mut configs: Vec<PackageConfigInput> = Vec::new();
@@ -583,28 +924,58 @@ fn build_package_from_components<R: Read + std::io::Seek>(
     for comp in components {
         match comp.kind.as_str() {
             "skill" => {
-                let (sid, sp) = idx.get(&comp.name).cloned().unwrap_or((String::new(), String::new()));
+                if let Some((sid, sp)) = idx.get(&comp.name).cloned() {
+                    skills.push(PackageSkillInput {
+                        name: comp.name.clone(),
+                        skill_id: Some(sid),
+                        source_path: sp,
+                    });
+                    continue;
+                }
+
+                let staging = TempImportDir::new("skill")?;
+                let extracted = staging.0.join(&comp.name);
+                extract_zip_directory(archive, &comp.path, &extracted)?;
+                let root = bundled_skill_root(&extracted)?;
+                let result = crate::skill_install::install_skill_impl(
+                    &transaction,
+                    &crate::skill_install::SkillSourceInput {
+                        kind: "path".to_string(),
+                        source_ref: root.to_string_lossy().to_string(),
+                    },
+                    library_source_id,
+                    override_audit,
+                )?;
+                let Some(skill_id) = result.skill_id else {
+                    return Err(format!(
+                        "导入打包 Skill 被拦截（{}）: {}",
+                        result.status, result.message
+                    ));
+                };
                 skills.push(PackageSkillInput {
                     name: comp.name.clone(),
-                    skill_id: if sid.is_empty() { None } else { Some(sid) },
-                    source_path: sp,
+                    skill_id: Some(skill_id),
+                    source_path: result.target_path,
                 });
             }
             "mcp" => {
-                let cfg = read_zip_text(archive, &comp.path).unwrap_or_default();
+                let cfg = read_zip_text(archive, &comp.path)
+                    .ok_or_else(|| format!("压缩包缺少 MCP 组件: {}", comp.path))?;
                 mcps.push(PackageMcpInput { name: comp.name.clone(), config_json: cfg });
             }
             "rule" => {
-                let content = read_zip_text(archive, &comp.path).unwrap_or_default();
+                let content = read_zip_text(archive, &comp.path)
+                    .ok_or_else(|| format!("压缩包缺少规则组件: {}", comp.path))?;
                 let (agent, file_name) = match comp.name.split_once(':') {
                     Some((a, f)) => (a.to_string(), f.to_string()),
                     None => ("claude".into(), "CLAUDE.md".into()),
                 };
+                agent_config::safe_config_target(Path::new("/"), &file_name)?;
                 configs.push(PackageConfigInput {
                     agent, category: "rules".into(), file_name, content,
                 });
             }
-            _ => {}
+            unknown => return Err(format!("不支持的 package 组件类型: {}", unknown)),
         }
     }
 
@@ -617,10 +988,13 @@ fn build_package_from_components<R: Read + std::io::Seek>(
         mcps,
         configs,
     };
-    save_package(conn, &input, None)
+    let package_id = save_package(&transaction, &input, None)?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(package_id)
 }
 
 
+#[derive(Debug)]
 struct ManifestComponent {
     kind: String,
     name: String,
@@ -699,6 +1073,7 @@ fn parse_manifest(raw: &str) -> Result<(String, String, String, String, Vec<Mani
                     components.push(ManifestComponent { kind, name: cname, path });
                 }
             }
+            i -= 1;
             continue;
         }
         i += 1;
@@ -781,22 +1156,52 @@ pub fn delete_pkg(db: State<DbState>, id: String) -> Result<(), String> {
     delete_package(&conn, &id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn apply_pkg(db: State<DbState>, id: String, runtime: String) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     apply_package(&conn, &id, &runtime)
 }
 
-#[tauri::command]
-pub fn export_pkg(db: State<DbState>, id: String, dest_dir: Option<String>) -> Result<String, String> {
+#[tauri::command(async)]
+pub fn preview_pkg(
+    db: State<DbState>,
+    id: String,
+    runtime: String,
+) -> Result<PackageApplyPlan, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    export_package_zip_to(&conn, &id, dest_dir.as_deref())
+    preview_package_apply(&conn, &id, &runtime)
 }
 
-#[tauri::command]
-pub fn import_pkg(db: State<DbState>, zip_path: String) -> Result<String, String> {
+#[tauri::command(async)]
+pub fn export_pkg(
+    db: State<DbState>,
+    id: String,
+    dest_dir: Option<String>,
+    include_secrets: Option<bool>,
+) -> Result<PackageExportResult, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    import_package_zip(&conn, &zip_path)
+    export_package_zip_to(
+        &conn,
+        &id,
+        dest_dir.as_deref(),
+        include_secrets.unwrap_or(false),
+    )
+}
+
+#[tauri::command(async)]
+pub fn import_pkg(
+    db: State<DbState>,
+    zip_path: String,
+    library_source_id: Option<String>,
+    override_audit: Option<bool>,
+) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    import_package_zip(
+        &conn,
+        &zip_path,
+        library_source_id.as_deref(),
+        override_audit.unwrap_or(false),
+    )
 }
 
 /// 选择导出保存目录（macOS 原生文件夹选择器），返回绝对路径
@@ -819,68 +1224,447 @@ pub fn pick_folder() -> Result<Option<String>, String> {
     Ok(folder.map(|p| p.to_string_lossy().to_string()))
 }
 
-/// 把 package 应用到项目目录：skills 建 symlink 到 <project>/.agents/skills/，
-/// configs 直接写到项目根（CLAUDE.md / AGENTS.md 等），MCP 暂跳过（项目级 MCP 配置差异太大）。
-pub fn apply_package_to_project(conn: &Connection, package_id: &str, project_path: &str) -> Result<(), String> {
+/// 把 package 应用到项目目录。配置路径只允许项目根下的一个 basename；覆盖已有
+/// 配置必须显式确认。项目级 MCP 格式差异较大，当前仍显式跳过。
+pub fn apply_package_to_project(
+    conn: &Connection,
+    package_id: &str,
+    project_path: &str,
+    confirmed_overwrite: bool,
+) -> Result<(), String> {
     let detail = get_package_detail(conn, package_id)
         .ok_or_else(|| "package not found".to_string())?;
-    let idx = skill_index(conn);
     let project = PathBuf::from(project_path);
     if !project.is_dir() {
         return Err(format!("不是有效目录: {}", project_path));
     }
-
-    // skills → <project>/.agents/skills/
-    let skills_dir = project.join(".agents").join("skills");
-    fs::create_dir_all(&skills_dir).ok();
-    for s in &detail.skills {
-        let src_path = if let Some(ref sid) = s.skill_id {
-            conn.query_row(
-                "SELECT path FROM skills WHERE id=?1",
-                params![sid],
-                |row| row.get::<_, String>(0),
-            )
-            .ok()
-        } else {
-            idx.get(&s.name).map(|(_, p)| p.clone())
-        };
-        let src = match src_path {
-            Some(p) if !p.is_empty() => PathBuf::from(p),
-            _ => continue,
-        };
-        let dir_name = src
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| s.name.clone());
-        let sym = skills_dir.join(&dir_name);
-        if sym.exists() || sym.is_symlink() {
-            if sym.is_symlink() {
-                fs::remove_file(&sym).ok();
-            } else {
- continue;
-            }
-        }
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&src, &sym).ok();
-        }
+    let project = fs::canonicalize(&project).map_err(|error| error.to_string())?;
+    let agents_dir = project.join(".agents");
+    if fs::symlink_metadata(&agents_dir)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(format!(".agents 是软链，拒绝写入: {}", agents_dir.to_string_lossy()));
+    }
+    let skills_dir = agents_dir.join("skills");
+    if fs::symlink_metadata(&skills_dir)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(format!("skills 是软链，拒绝写入: {}", skills_dir.to_string_lossy()));
     }
 
-    // configs → <project>/<file_name>
-    for c in &detail.configs {
-        let target = project.join(&c.file_name);
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let mut resolved_skills = Vec::new();
+    for entry in &detail.skills {
+        let action = skill_apply_action(conn, entry, &skills_dir);
+        if action.blocked {
+            return Err(format!("APPLY_BLOCKED:{}: {}", entry.name, action.detail));
         }
-        fs::write(&target, &c.content).map_err(|e| e.to_string())?;
+        let source = skill_source_path(conn, entry).ok_or_else(|| format!("Skill 不在当前库中: {}", entry.name))?;
+        let Some(skill_id) = package_skill_id(conn, entry) else {
+            return Err(format!("无法确定 Skill ID: {}", entry.name));
+        };
+        resolved_skills.push((skill_id, source));
+    }
+
+    let mut resolved_configs = Vec::new();
+    for entry in &detail.configs {
+        let target = agent_config::safe_config_target(&project, &entry.file_name)?;
+        let existing = fs::read_to_string(&target);
+        if let Ok(existing) = existing {
+            if existing != entry.content && !confirmed_overwrite {
+                return Err(format!(
+                    "CONFIRM_PROJECT_OVERWRITE:{}",
+                    target.to_string_lossy()
+                ));
+            }
+        }
+        resolved_configs.push((target, entry.content.clone()));
+    }
+
+    fs::create_dir_all(&skills_dir).map_err(|error| error.to_string())?;
+    for (skill_id, source) in resolved_skills {
+        let canonical_source = fs::canonicalize(&source).map_err(|error| error.to_string())?;
+        let Some(entry_name) = canonical_source.file_name() else {
+            return Err("invalid skill source path".to_string());
+        };
+        let link = skills_dir.join(entry_name);
+        if link.exists() || link.is_symlink() {
+            continue;
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&canonical_source, &link).map_err(|error| error.to_string())?;
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&canonical_source, &link)
+            .map_err(|error| error.to_string())?;
+        let linked = canonical_source.join("SKILL.md").is_file();
+        conn.execute(
+            "INSERT INTO connections (skill_id, runtime, linked, symlink_path, updated_at)
+             VALUES (?1, '.agents', ?2, ?3, ?4)
+             ON CONFLICT(skill_id, runtime) DO UPDATE SET
+                linked=excluded.linked, symlink_path=excluded.symlink_path, updated_at=excluded.updated_at",
+            params![skill_id, linked as i64, link.to_string_lossy(), crate::db::now_iso()],
+        )
+        .ok();
+    }
+
+    for (target, content) in resolved_configs {
+        agent_config::atomic_write(&target, content.as_bytes())?;
     }
 
     log_activity(conn, "package_apply_project", &format!("{} -> {}", detail.name, project_path));
     Ok(())
 }
 
-#[tauri::command]
-pub fn apply_pkg_to_project(db: State<DbState>, id: String, project_path: String) -> Result<(), String> {
+#[tauri::command(async)]
+pub fn apply_pkg_to_project(
+    db: State<DbState>,
+    id: String,
+    project_path: String,
+    confirmed_overwrite: Option<bool>,
+) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    apply_package_to_project(&conn, &id, &project_path)
+    apply_package_to_project(&conn, &id, &project_path, confirmed_overwrite.unwrap_or(false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{
+        open_in_memory, PackageConfigInput, PackageInput, PackageMcpInput, PackageSkillInput,
+    };
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("skilldeck-pkg-{name}-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn insert_skill(conn: &Connection, id: &str, name: &str, path: &Path) {
+        conn.execute(
+            "INSERT INTO skills (id, name, source_lib, path, created_at, updated_at)
+             VALUES (?1, ?2, 'main', ?3, '1', '1')",
+            params![id, name, path.to_string_lossy().to_string()],
+        )
+        .unwrap();
+    }
+
+    fn demo_input(skill_path: &str) -> PackageInput {
+        PackageInput {
+            name: "demo".into(),
+            display_name: Some("Demo Pack".into()),
+            version: Some("1.2.0".into()),
+            description: Some("round trip".into()),
+            skills: vec![PackageSkillInput {
+                name: "my-skill".into(),
+                skill_id: Some("s1".into()),
+                source_path: skill_path.into(),
+            }],
+            mcps: vec![PackageMcpInput {
+                name: "fetch".into(),
+                config_json: r#"{"command":"mcp-fetch"}"#.into(),
+            }],
+            configs: vec![PackageConfigInput {
+                agent: "claude".into(),
+                category: "rules".into(),
+                file_name: "CLAUDE.md".into(),
+                content: "# Project Rules".into(),
+            }],
+        }
+    }
+
+    fn zip_entry_contents(path: &Path, suffix: &str) -> String {
+        let file = fs::File::open(path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i).unwrap();
+            if entry.name().ends_with(suffix) {
+                let mut out = String::new();
+                entry.read_to_string(&mut out).unwrap();
+                return out;
+            }
+        }
+        panic!("zip entry ending with {suffix} not found");
+    }
+
+    #[test]
+    fn parse_manifest_supports_yaml_and_json() {
+        let yaml = r#"
+specVersion: "0.1"
+name: "yaml-pack"
+displayName: "YAML Pack"
+version: "2.0.0"
+description: "yaml manifest"
+components:
+  - type: skill
+    name: "my-skill"
+    path: skills/my-skill
+  - type: mcp
+    name: "fetch"
+    path: mcp/fetch.json
+  - type: rule
+    name: "claude:CLAUDE.md"
+    path: rules/claude-CLAUDE.md
+"#;
+        let (name, display, version, description, comps) = parse_manifest(yaml).unwrap();
+        assert_eq!((name.as_str(), display.as_str(), version.as_str(), description.as_str()),
+            ("yaml-pack", "YAML Pack", "2.0.0", "yaml manifest"));
+        assert_eq!(comps.len(), 3);
+        assert_eq!(comps[0].kind, "skill");
+        assert_eq!(comps[0].name, "my-skill");
+        assert_eq!(comps[0].path, "skills/my-skill");
+
+        let json = r#"{
+            "name": "json-pack",
+            "displayName": "JSON Pack",
+            "components": [
+                {"type": "mcp", "name": "fetch", "path": "mcp/fetch.json"}
+            ]
+        }"#;
+        let (name, _display, version, _description, comps) = parse_manifest(json).unwrap();
+        assert_eq!(name, "json-pack");
+        assert_eq!(version, "0.1.0");
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0].kind, "mcp");
+    }
+
+    #[test]
+    fn parse_manifest_rejects_missing_name() {
+        let err = parse_manifest("version: \"1.0.0\"\n").unwrap_err();
+        assert!(err.contains("name"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn package_export_import_round_trip() {
+        let dir = temp_dir("round-trip");
+        let skill_dir = dir.join("lib").join("my-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "---\nname: my-skill\n---\n").unwrap();
+        let skill_path = skill_dir.to_string_lossy().to_string();
+
+        let conn = open_in_memory();
+        insert_skill(&conn, "s1", "my-skill", &skill_dir);
+        let id = save_package(&conn, &demo_input(&skill_path), None).unwrap();
+
+        let staging_root = dir.join("staging");
+        let dest_dir = dir.join("dest");
+        fs::create_dir_all(&dest_dir).unwrap();
+        let export = export_package_zip_to_dirs(
+            &conn,
+            &id,
+            &staging_root,
+            Some(dest_dir.to_str().unwrap()),
+            false,
+        )
+        .unwrap();
+        let zip_path = export.zip_path.clone();
+
+        assert_eq!(zip_path, dest_dir.join("demo.ai-package.zip").to_string_lossy().to_string());
+        let manifest = zip_entry_contents(Path::new(&zip_path), "manifest.yaml");
+        assert!(manifest.contains("name: \"demo\""));
+        assert!(manifest.contains("path: skills/my-skill"));
+        assert!(manifest.contains("path: mcp/fetch.json"));
+        assert!(manifest.contains("path: rules/claude-CLAUDE-md"));
+        assert!(zip_entry_contents(Path::new(&zip_path), "mcp/fetch.json").contains("mcp-fetch"));
+        assert_eq!(
+            zip_entry_contents(Path::new(&zip_path), "rules/claude-CLAUDE-md"),
+            "# Project Rules"
+        );
+
+        // 导入到全新数据库，skill 靠名称重新关联
+        let fresh = open_in_memory();
+        insert_skill(&fresh, "s1", "my-skill", &skill_dir);
+        let imported_id = import_package_zip(&fresh, &zip_path, Some("main"), false).unwrap();
+        let detail = get_package_detail(&fresh, &imported_id).unwrap();
+        assert_eq!(detail.name, "demo");
+        assert_eq!(detail.display_name, "Demo Pack");
+        assert_eq!(detail.version, "1.2.0");
+        assert_eq!(detail.skills.len(), 1);
+        assert_eq!(detail.skills[0].skill_id.as_deref(), Some("s1"));
+        assert_eq!(detail.mcps.len(), 1);
+        assert!(detail.mcps[0].config_json.contains("mcp-fetch"));
+        assert_eq!(detail.configs.len(), 1);
+        assert_eq!(detail.configs[0].content, "# Project Rules");
+    }
+
+    #[test]
+    fn import_rejects_zip_without_manifest() {
+        let dir = temp_dir("no-manifest");
+        let zip_path = dir.join("bad.ai-package.zip");
+        let file = fs::File::create(&zip_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let opts = SimpleFileOptions::default();
+        writer.start_file("skills/x/SKILL.md", opts).unwrap();
+        writer.write_all(b"content").unwrap();
+        writer.finish().unwrap();
+
+        let conn = open_in_memory();
+        let err = import_package_zip(&conn, zip_path.to_str().unwrap(), Some("main"), false).unwrap_err();
+        assert!(err.contains("manifest"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn export_redacts_sensitive_env_values_by_default() {
+        let (redacted, keys) =
+            redact_mcp_config(r#"{"command":"fetch","env":{"API_KEY":"raw","DEBUG":"1"}}"#)
+                .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(value["env"]["API_KEY"], "${API_KEY}");
+        assert_eq!(value["env"]["DEBUG"], "1");
+        assert_eq!(value["command"], "fetch");
+        assert_eq!(keys, vec!["API_KEY".to_string()]);
+        assert!(sensitive_env_key("GITHUB_TOKEN"));
+        assert!(sensitive_env_key("client_secret"));
+        assert!(!sensitive_env_key("timeout"));
+    }
+
+    #[test]
+    fn import_installs_bundled_skill_into_fresh_library() {
+        let dir = temp_dir("self-contained");
+        let skill_dir = dir.join("lib").join("my-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: my-skill\n---\n",
+        )
+        .unwrap();
+        let conn = open_in_memory();
+        insert_skill(&conn, "s1", "my-skill", &skill_dir);
+        let id = save_package(
+            &conn,
+            &demo_input(&skill_dir.to_string_lossy().to_string()),
+            None,
+        )
+        .unwrap();
+        let staging_root = dir.join("staging");
+        let dest_dir = dir.join("dest");
+        fs::create_dir_all(&dest_dir).unwrap();
+        let export = export_package_zip_to_dirs(
+            &conn,
+            &id,
+            &staging_root,
+            Some(dest_dir.to_str().unwrap()),
+            false,
+        )
+        .unwrap();
+        let manifest = zip_entry_contents(Path::new(&export.zip_path), "manifest.yaml");
+        assert_eq!(parse_manifest(&manifest).unwrap().4.len(), 3);
+
+        let library_dir = dir.join("fresh-library");
+        fs::create_dir_all(&library_dir).unwrap();
+        let fresh = open_in_memory();
+        crate::skill_install::set_staging_root(dir.join("import-staging"));
+        fresh.execute(
+            "INSERT INTO library_sources (id, name, path, enabled, sort_order, created_at, updated_at)
+             VALUES ('test', 'Test', ?1, 1, 0, '1', '1')",
+            params![library_dir.to_string_lossy()],
+        )
+        .unwrap();
+        let imported_id =
+            import_package_zip(&fresh, &export.zip_path, Some("test"), false).unwrap();
+        let detail = get_package_detail(&fresh, &imported_id).unwrap();
+        assert_eq!(detail.skills.len(), 1);
+        let skill_id = detail.skills[0].skill_id.clone().unwrap();
+        assert!(!skill_id.is_empty());
+        let source_path: String = fresh
+            .query_row(
+                "SELECT path FROM skills WHERE id = ?1",
+                params![skill_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(source_path.starts_with(library_dir.to_string_lossy().as_ref()));
+        assert!(Path::new(&source_path).join("SKILL.md").is_file());
+    }
+
+    #[test]
+    fn project_apply_rejects_config_path_traversal_and_requires_overwrite_confirmation() {
+        let dir = temp_dir("project-guard");
+        let project = dir.join("project");
+        fs::create_dir_all(&project).unwrap();
+        let conn = open_in_memory();
+        let id = save_package(
+            &conn,
+            &PackageInput {
+                name: "unsafe".into(),
+                display_name: Some("Unsafe".into()),
+                version: Some("0.1.0".into()),
+                description: None,
+                skills: vec![],
+                mcps: vec![],
+                configs: vec![PackageConfigInput {
+                    agent: "claude".into(),
+                    category: "rules".into(),
+                    file_name: "../outside.md".into(),
+                    content: "danger".into(),
+                }],
+            },
+            None,
+        )
+        .unwrap();
+        let traversal =
+            apply_package_to_project(&conn, &id, project.to_str().unwrap(), false).unwrap_err();
+        assert!(traversal.contains("非法配置文件名"));
+        assert!(!dir.join("outside.md").exists());
+
+        let id = save_package(
+            &conn,
+            &PackageInput {
+                name: "overwrite".into(),
+                display_name: Some("Overwrite".into()),
+                version: Some("0.1.0".into()),
+                description: None,
+                skills: vec![],
+                mcps: vec![],
+                configs: vec![PackageConfigInput {
+                    agent: "claude".into(),
+                    category: "rules".into(),
+                    file_name: "CLAUDE.md".into(),
+                    content: "next".into(),
+                }],
+            },
+            None,
+        )
+        .unwrap();
+        fs::write(project.join("CLAUDE.md"), "old").unwrap();
+        let required =
+            apply_package_to_project(&conn, &id, project.to_str().unwrap(), false).unwrap_err();
+        assert!(required.contains("CONFIRM_PROJECT_OVERWRITE"));
+        assert_eq!(fs::read_to_string(project.join("CLAUDE.md")).unwrap(), "old");
+        apply_package_to_project(&conn, &id, project.to_str().unwrap(), true).unwrap();
+        assert_eq!(fs::read_to_string(project.join("CLAUDE.md")).unwrap(), "next");
+    }
+
+    #[test]
+    fn apply_package_to_project_links_skills_and_writes_configs() {
+        let dir = temp_dir("apply-project");
+        let skill_dir = dir.join("lib").join("my-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "---\nname: my-skill\n---\n").unwrap();
+
+        let conn = open_in_memory();
+        insert_skill(&conn, "s1", "my-skill", &skill_dir);
+        let id = save_package(
+            &conn,
+            &demo_input(&skill_dir.to_string_lossy().to_string()),
+            None,
+        )
+        .unwrap();
+
+        let project = dir.join("project");
+        fs::create_dir_all(&project).unwrap();
+        apply_package_to_project(&conn, &id, project.to_str().unwrap(), false).unwrap();
+
+        let link = project.join(".agents").join("skills").join("my-skill");
+        assert!(link.is_symlink());
+        assert_eq!(fs::read_link(&link).unwrap(), skill_dir);
+        assert_eq!(
+            fs::read_to_string(project.join("CLAUDE.md")).unwrap(),
+            "# Project Rules"
+        );
+
+        let missing = dir.join("missing-project");
+        let err = apply_package_to_project(&conn, &id, missing.to_str().unwrap(), false).unwrap_err();
+        assert!(err.contains("不是有效目录"), "unexpected error: {err}");
+    }
 }

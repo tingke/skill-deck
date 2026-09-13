@@ -6,20 +6,22 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
+const testsDir = fileURLToPath(new URL("../tests", import.meta.url));
+const testEntries = readdirSync(testsDir)
+  .filter((file) => file.endsWith(".test.ts"))
+  .map((file) => join(testsDir, file))
+  .sort();
+
+if (testEntries.length === 0) {
+  console.error("No test files found in tests/");
+  process.exit(1);
+}
+
 const outputDir = mkdtempSync(join(tmpdir(), "skill-deck-tests-"));
 
 try {
   await build({
-    entryPoints: [
-      fileURLToPath(new URL("../tests/scanning.test.ts", import.meta.url)),
-      fileURLToPath(new URL("../tests/connection-confirmation.test.ts", import.meta.url)),
-      fileURLToPath(new URL("../tests/skill-delete-confirmation.test.ts", import.meta.url)),
-      fileURLToPath(new URL("../tests/skill-batch.test.ts", import.meta.url)),
-      fileURLToPath(new URL("../tests/skill-paths.test.ts", import.meta.url)),
-      fileURLToPath(new URL("../tests/agent-activity-notifications.test.ts", import.meta.url)),
-      fileURLToPath(new URL("../tests/skill-audit.test.ts", import.meta.url)),
-      fileURLToPath(new URL("../tests/release.test.ts", import.meta.url)),
-    ],
+    entryPoints: testEntries,
     bundle: true,
     platform: "node",
     format: "esm",

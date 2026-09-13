@@ -1,4 +1,5 @@
 pub mod db;
+pub mod agent_config;
 pub mod agent_activity;
 pub mod scanner;
 pub mod commands;
@@ -21,6 +22,8 @@ pub use agent_activity::run_hook_cli;
 pub fn run() {
     tauri::Builder::default()
         .manage(DbState(std::sync::Mutex::new(open())))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 
@@ -46,12 +49,22 @@ pub fn run() {
 
             let reload = MenuItem::with_id(app, "reload", "Reload Page", true, Some("CmdOrCtrl+R"))?;
             let force_reload = MenuItem::with_id(app, "force_reload", "Force Reload", true, Some("CmdOrCtrl+Shift+R"))?;
+            // release 构建不带 devtools；仅在 debug 或显式启用 devtools feature 时显示菜单项。
+            #[cfg(any(debug_assertions, feature = "devtools"))]
             let devtools = MenuItem::with_id(app, "toggle_devtools", "Toggle Developer Tools", true, Some("CmdOrCtrl+Alt+I"))?;
+            #[cfg(any(debug_assertions, feature = "devtools"))]
             let view_menu = Submenu::with_items(app, "View", true, &[
                 &reload,
                 &force_reload,
                 &PredefinedMenuItem::separator(app)?,
                 &devtools,
+                &PredefinedMenuItem::fullscreen(app, None)?,
+            ])?;
+            #[cfg(not(any(debug_assertions, feature = "devtools")))]
+            let view_menu = Submenu::with_items(app, "View", true, &[
+                &reload,
+                &force_reload,
+                &PredefinedMenuItem::separator(app)?,
                 &PredefinedMenuItem::fullscreen(app, None)?,
             ])?;
 
@@ -80,6 +93,7 @@ pub fn run() {
                         );
                     }
                 }
+                #[cfg(any(debug_assertions, feature = "devtools"))]
                 "toggle_devtools" => {
                     if let Some(window) = app.get_webview_window("main") {
                         if window.is_devtools_open() {
@@ -137,6 +151,7 @@ pub fn run() {
             packages::save_pkg,
             packages::delete_pkg,
             packages::apply_pkg,
+            packages::preview_pkg,
             packages::export_pkg,
             packages::import_pkg,
             packages::pick_folder,
@@ -174,7 +189,6 @@ pub fn run() {
            settings::pick_backup_folder,
            settings::pick_backup_file,
            settings::open_data_dir,
-           settings::check_update,
            settings::toggle_devtools,
            agent_activity::get_hook_observer_status,
            agent_activity::set_hook_observer_enabled,

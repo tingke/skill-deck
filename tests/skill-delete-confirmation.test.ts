@@ -7,21 +7,21 @@ test("skill deletion uses an explicit pending confirmation object", async () => 
     setItem: () => {},
     removeItem: () => {},
   } as Storage;
-  const { useAppStore } = await import("../src/stores/app");
+  const { useSkillsStore } = await import("../src/stores/skills");
 
-  assert.equal(useAppStore.getState().skillDeleteConfirmation, null);
+  assert.equal(useSkillsStore.getState().skillDeleteConfirmation, null);
 
-  useAppStore.getState().requestSkillDelete({
+  useSkillsStore.getState().requestSkillDelete({
     id: "skill-1",
     name: "Example Skill",
     path: "/tmp/example-skill",
   });
-  assert.deepEqual(useAppStore.getState().skillDeleteConfirmation, {
+  assert.deepEqual(useSkillsStore.getState().skillDeleteConfirmation, {
     id: "skill-1",
     name: "Example Skill",
     path: "/tmp/example-skill",
   });
 
-  useAppStore.getState().cancelSkillDelete();
-  assert.equal(useAppStore.getState().skillDeleteConfirmation, null);
+  useSkillsStore.getState().cancelSkillDelete();
+  assert.equal(useSkillsStore.getState().skillDeleteConfirmation, null);
 });

@@ -1,8 +1,10 @@
-import { useAppStore } from "../stores/app";
+import { useUiStore } from "../stores/ui";
+import { useSkillsStore } from "../stores/skills";
+import { useActivityStore } from "../stores/activity";
 import {
   BookOpen, Link2, RefreshCw, Link, Unlink, FileDown,
   Power, ArchiveRestore, Package, Cpu, FolderTree, ScrollText,
-  FolderKanban, Server, Webhook, Trash2,
+  FolderKanban, Server, Webhook, Trash2, Clock, Radio, ListTodo,
 } from "lucide-react";
 import { AGENT_COLORS } from "../types";
 import type { ActivityLog } from "../types";
@@ -70,7 +72,7 @@ function ActivityIcon({ action }: { action: string }) {
       case "package_apply":
       case "package_export":
       case "package_import":
-      case "package_apply_project": return "text-violet-500 bg-violet-50 dark:bg-violet-900/30";
+      case "package_apply_project": return "text-accent bg-accent-soft";
       default: return "text-faint bg-surface-2 ";
     }
   };
@@ -128,7 +130,9 @@ function activityDetail(action: string, detail: string, t: (k: TranslationKey, v
 
 export default function DashboardView() {
   const t = useT();
-  const { skills, agentOptions, activity, agentActivity: activitySnapshot, setView } = useAppStore();
+  const { skills, agentOptions } = useSkillsStore();
+  const { activity, agentActivity: activitySnapshot } = useActivityStore();
+  const setView = useUiStore((s) => s.setView);
 
   const activityStateColor = (state: string) => {
     if (state === "working") return "bg-emerald-500";
@@ -139,14 +143,15 @@ export default function DashboardView() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <div className="mb-5">
-        <h2 className="text-lg font-bold">{t("dashboard.title")}</h2>
+      <div className="mb-5 flex items-baseline gap-3">
+        <h2 className="text-lg font-bold tracking-tight">{t("dashboard.title")}</h2>
+        <span className="text-2xs text-faint">实时面板</span>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         {/* Agent status */}
-        <div className="bg-surface rounded-xl p-4 border border-border">
-          <h3 className="text-xs font-semibold text-muted mb-3">{t("dashboard.agentStatus")}</h3>
+        <div className="card p-4">
+          <h3 className="text-xs font-semibold text-muted mb-3 uppercase tracking-wider">{t("dashboard.agentStatus")}</h3>
           <div className="space-y-2">
             {agentOptions.map((rt) => {
               const count = skills.filter((s) => s.links.includes(rt.id)).length;
@@ -162,16 +167,19 @@ export default function DashboardView() {
               );
             })}
           </div>
-          <button onClick={() => setView("skills")} className="flex items-center gap-1 text-[11px] text-faint hover:text-content dark:hover:text-content mt-3">
+          <button onClick={() => setView("skills")} className="flex items-center gap-1 text-[11px] text-faint hover:text-accent mt-3 transition-colors">
             <BookOpen size={12} /> {t("dashboard.goSkills")} <Link2 size={12} />
           </button>
         </div>
 
         {/* Recent activity */}
-        <div className="bg-surface rounded-xl p-4 border border-border">
-          <h3 className="text-xs font-semibold text-muted mb-3">{t("dashboard.recentActivity")}</h3>
+        <div className="card p-4">
+          <h3 className="text-xs font-semibold text-muted mb-3 uppercase tracking-wider">{t("dashboard.recentActivity")}</h3>
           {activity.length === 0 ? (
-            <p className="text-xs text-faint py-4 text-center">{t("dashboard.noActivity")}</p>
+            <div className="mini-empty">
+              <div className="mini-empty__icon"><Clock size={15} strokeWidth={1.5} /></div>
+              <p className="mini-empty__text">{t("dashboard.noActivity")}</p>
+            </div>
           ) : (
             <div className="space-y-1.5">
               {activity.slice(0, 6).map((a: ActivityLog) => (
@@ -189,15 +197,18 @@ export default function DashboardView() {
         </div>
 
         {/* Live Agent activity observed by hooks */}
-        <div className="bg-surface rounded-xl p-4 border border-border">
+        <div className="card p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
-            <h3 className="text-xs font-semibold text-muted">{t("dashboard.agentActivity")}</h3>
-            <button onClick={() => setView("hooks")} className="text-[11px] text-faint hover:text-content dark:hover:text-content">
+            <h3 className="text-xs font-semibold text-muted uppercase tracking-wider">{t("dashboard.agentActivity")}</h3>
+            <button onClick={() => setView("hooks")} className="text-[11px] text-faint hover:text-accent transition-colors">
               {t("dashboard.configureHooks")}
             </button>
           </div>
           {activitySnapshot.events.length === 0 ? (
-            <p className="text-xs text-faint py-4 text-center">{t("dashboard.noAgentActivity")}</p>
+            <div className="mini-empty">
+              <div className="mini-empty__icon"><Radio size={15} strokeWidth={1.5} /></div>
+              <p className="mini-empty__text">{t("dashboard.noAgentActivity")}</p>
+            </div>
           ) : (
             <div className="space-y-2">
               {activitySnapshot.events.slice(0, 6).map((event) => (
@@ -220,10 +231,13 @@ export default function DashboardView() {
         </div>
 
         {/* Generic task progress reported by hooks */}
-        <div className="bg-surface rounded-xl p-4 border border-border">
-          <h3 className="text-xs font-semibold text-muted mb-3">{t("dashboard.taskProgress")}</h3>
+        <div className="card p-4">
+          <h3 className="text-xs font-semibold text-muted mb-3 uppercase tracking-wider">{t("dashboard.taskProgress")}</h3>
           {activitySnapshot.tasks.length === 0 ? (
-            <p className="text-xs text-faint py-4 text-center">{t("dashboard.noTaskProgress")}</p>
+            <div className="mini-empty">
+              <div className="mini-empty__icon"><ListTodo size={15} strokeWidth={1.5} /></div>
+              <p className="mini-empty__text">{t("dashboard.noTaskProgress")}</p>
+            </div>
           ) : (
             <div className="space-y-2.5">
               {activitySnapshot.tasks.slice(0, 5).map((task) => (
@@ -237,16 +251,23 @@ export default function DashboardView() {
                   <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden">
                     <div
                       className={
-                        "h-full rounded-full " +
+                        "h-full rounded-full transition-all duration-normal " +
                         (task.progress === null
-                          ? "bg-sky-500/50"
+                          ? "bg-tertiary-soft"
                           : task.progress >= 1
                             ? "bg-emerald-500"
-                            : "bg-sky-500")
+                            : "")
                       }
-                      style={{
-                        width: task.progress === null ? "100%" : `${Math.round(task.progress * 100)}%`,
-                      }}
+                      style={
+                        task.progress !== null && task.progress < 1
+                          ? {
+                              width: `${Math.round(task.progress * 100)}%`,
+                              background: "var(--grad-brand-h)",
+                            }
+                          : {
+                              width: "100%",
+                            }
+                      }
                     />
                   </div>
                   <p className="text-2xs text-faint truncate mt-1">

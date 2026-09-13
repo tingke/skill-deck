@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { useAppStore } from "../stores/app";
+import { useSkillsStore } from "../stores/skills";
+import { useWorkspaceStore } from "../stores/workspace";
+import { usePackagesStore } from "../stores/packages";
+import { useActivityStore } from "../stores/activity";
 import { saveProject, deleteProject, pickProjectFolder, createPkgFromProject } from "../lib/tauri";
 import { revealInFinder } from "../lib/tauri";
 import { useToastStore } from "../stores/toast";
@@ -40,7 +43,11 @@ function colorOf(c: string) {
 
 export default function ProjectsView() {
   const t = useT();
-  const { projects, skills, loadProjects, scanNow, loadPackages, loadActivity } = useAppStore();
+  const { projects, loadProjects } = useWorkspaceStore();
+  const skills = useSkillsStore((s) => s.skills);
+  const scanNow = useSkillsStore((s) => s.scanNow);
+  const loadPackages = usePackagesStore((s) => s.loadPackages);
+  const loadActivity = useActivityStore((s) => s.loadActivity);
   const [editing, setEditing] = useState<ProjectRow | null>(null);
   const [presetProjectId, setPresetProjectId] = useState<string | null>(null);
   const deleteConfirmation = useDeleteConfirmation();

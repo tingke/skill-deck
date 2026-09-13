@@ -3,11 +3,11 @@ use rusqlite::params;
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
-use tauri::{Manager, State};
+use tauri::State;
+#[cfg(any(debug_assertions, feature = "devtools"))]
+use tauri::Manager;
 
 /// GitHub "owner/repo" for release checks. Leave empty to disable online update check.
-const GITHUB_REPO: &str = "tingke/skill-deck";
-
 // ============ App metadata ============
 
 #[derive(Serialize)]
@@ -99,10 +99,13 @@ pub fn set_autostart(enabled: bool) -> Result<bool, String> {
 // ============ Backup / Restore ============
 
 /// Backup the SQLite database to a user-chosen directory with a timestamped name.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn backup_database(db: State<DbState>, dest_dir: String) -> Result<String, String> {
     let _conn = db.0.lock().map_err(|e| e.to_string())?; // hold lock so no write races the copy
-    let src = db_path();
+    backup_database_to(&db_path(), &dest_dir)
+}
+
+fn backup_database_to(src: &std::path::Path, dest_dir: &str) -> Result<String, String> {
     if !src.exists() {
         return Err("数据库文件不存在".into());
     }
@@ -113,10 +116,13 @@ pub fn backup_database(db: State<DbState>, dest_dir: String) -> Result<String, S
 
 /// Restore the database from a backup .db file by ATTACH-ing it and copying
 /// every table's rows into the live connection. No restart needed.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn restore_database(db: State<DbState>, src_path: String) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    restore_database_from(&conn, &src_path)
+}
 
+fn restore_database_from(conn: &rusqlite::Connection, src_path: &str) -> Result<(), String> {
     conn.execute("ATTACH DATABASE ?1 AS src", params![&src_path])
         .map_err(|e| format!("无法打开备份文件: {}", e))?;
 
@@ -212,6 +218,8 @@ pub fn open_data_dir() -> Result<(), String> {
 
 #[tauri::command]
 pub fn toggle_devtools(app: tauri::AppHandle, open: bool) -> Result<(), String> {
+    #[cfg(any(debug_assertions, feature = "devtools"))]
+    {
     if let Some(window) = app.get_webview_window("main") {
         if open {
             window.open_devtools();
@@ -219,77 +227,131 @@ pub fn toggle_devtools(app: tauri::AppHandle, open: bool) -> Result<(), String> 
             window.close_devtools();
         }
     }
+    }
+    #[cfg(not(any(debug_assertions, feature = "devtools")))]
+    {
+        let _ = (app, open);
+    }
     Ok(())
 }
 
-// ============ Update check ============
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_in_memory;
+    use uuid::Uuid;
 
-#[derive(Serialize)]
-pub struct UpdateInfo {
-    pub has_update: bool,
-    pub current: String,
-    pub latest: String,
-    pub url: String,
-    pub not_configured: bool,
-}
-
-/// Check GitHub releases for a newer version via curl (no extra Rust deps).
-/// When GITHUB_REPO is empty, returns not_configured = true.
-#[tauri::command]
-pub async fn check_update() -> Result<UpdateInfo, String> {
-    let current = env!("CARGO_PKG_VERSION").to_string();
-
-    if GITHUB_REPO.is_empty() {
-        return Ok(UpdateInfo {
-            has_update: false,
-            current,
-            latest: String::new(),
-            url: String::new(),
-            not_configured: true,
-        });
+    fn temp_dir(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("skilldeck-settings-{name}-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).unwrap();
+        path
     }
 
-    let repo = GITHUB_REPO.to_string();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
-        std::process::Command::new("curl")
-            .arg("-s")
-            .arg("-H")
-            .arg("Accept: application/vnd.github+json")
-            .arg("--max-time")
-            .arg("12")
-            .arg(&url)
-            .output()
-    })
-    .await
-    .map_err(|e| format!("检查失败: {}", e))?;
+    #[test]
+    fn backup_copies_database_file_into_destination() {
+        let dir = temp_dir("backup");
+        let src = dir.join("skilldeck.db");
+        fs::write(&src, b"live database bytes").unwrap();
 
-    let output = result.map_err(|e| format!("网络请求失败: {}", e))?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if stdout.trim().is_empty() {
-        return Err("无法连接到更新服务器".into());
+        let dest_dir = dir.join("backups");
+        fs::create_dir_all(&dest_dir).unwrap();
+        let dest = backup_database_to(&src, dest_dir.to_str().unwrap()).unwrap();
+
+        let dest_path = PathBuf::from(&dest);
+        assert!(dest_path.starts_with(&dest_dir));
+        assert_eq!(fs::read(&dest_path).unwrap(), b"live database bytes");
     }
 
-    let v: serde_json::Value =
-        serde_json::from_str(&stdout).map_err(|e| format!("解析响应失败: {}", e))?;
+    #[test]
+    fn backup_rejects_missing_source_database() {
+        let dir = temp_dir("backup-missing");
+        let err = backup_database_to(&dir.join("missing.db"), dir.to_str().unwrap())
+            .unwrap_err();
+        assert_eq!(err, "数据库文件不存在");
+    }
 
-    let tag = v
-        .get("tag_name")
-        .and_then(|t| t.as_str())
-        .unwrap_or("")
-        .trim_start_matches('v')
-        .to_string();
-    let html_url = v
-        .get("html_url")
-        .and_then(|u| u.as_str())
-        .unwrap_or("")
-        .to_string();
+    #[test]
+    fn restore_replaces_live_rows_with_backup_rows() {
+        let dir = temp_dir("restore");
+        let backup_path = dir.join("backup.db");
+        {
+            let backup = rusqlite::Connection::open(&backup_path).unwrap();
+            crate::db::migrate(&backup);
+            backup
+                .execute(
+                    "INSERT INTO settings (key, value) VALUES ('theme', 'dark')",
+                    [],
+                )
+                .unwrap();
+            backup
+                .execute(
+                    "INSERT INTO skills (id, name, source_lib, path, created_at, updated_at)
+                     VALUES ('s1', 'backup-skill', 'lib', '/tmp/skill', '1', '1')",
+                    [],
+                )
+                .unwrap();
+        }
 
-    Ok(UpdateInfo {
-        has_update: !tag.is_empty() && tag != current,
-        current,
-        latest: tag,
-        url: html_url,
-        not_configured: false,
-    })
+        let live = open_in_memory();
+        live.execute(
+            "INSERT INTO settings (key, value) VALUES ('theme', 'light')",
+            [],
+        )
+        .unwrap();
+        live.execute(
+            "INSERT INTO settings (key, value) VALUES ('language', 'zh')",
+            [],
+        )
+ .unwrap();
+
+        restore_database_from(&live, backup_path.to_str().unwrap()).unwrap();
+
+        let theme: String = live
+            .query_row("SELECT value FROM settings WHERE key='theme'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(theme, "dark");
+        let language_count: i64 = live
+            .query_row("SELECT COUNT(*) FROM settings WHERE key='language'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(language_count, 0, "恢复后应清空原库中不在备份里的行");
+        let skill_name: String = live
+            .query_row("SELECT name FROM skills WHERE id='s1'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(skill_name, "backup-skill");
+    }
+
+    #[test]
+    fn restore_skips_tables_missing_from_old_backup() {
+        let dir = temp_dir("restore-old");
+        let backup_path = dir.join("old-backup.db");
+        {
+            // 旧备份只有 settings 表，没有 skills 等新表
+            let backup = rusqlite::Connection::open(&backup_path).unwrap();
+            backup
+                .execute_batch(
+                    "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+                     INSERT INTO settings VALUES ('theme', 'system');",
+                )
+                .unwrap();
+        }
+
+        let live = open_in_memory();
+        live.execute(
+            "INSERT INTO skills (id, name, source_lib, path, created_at, updated_at)
+             VALUES ('live-1', 'live-skill', 'lib', '/tmp/live', '1', '1')",
+            [],
+        )
+        .unwrap();
+
+        restore_database_from(&live, backup_path.to_str().unwrap()).unwrap();
+
+        let theme: String = live
+            .query_row("SELECT value FROM settings WHERE key='theme'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(theme, "system");
+        let live_skill: String = live
+            .query_row("SELECT name FROM skills WHERE id='live-1'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(live_skill, "live-skill", "备份缺失的表应保持原库数据不变");
+    }
 }

@@ -1,5 +1,7 @@
+use crate::agent_config::{self, McpConfigFormat};
 use crate::db::{
-    now_iso, log_activity, DbState, ExtensionRow, HookInput, McpServerInput, PluginToggleInput,
+    db_enabled_agents, now_iso, log_activity, DbState, ExtensionRow, HookInput, McpServerInput,
+    PluginToggleInput,
 };
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
@@ -14,19 +16,35 @@ fn home() -> PathBuf {
 }
 
 fn claude_json_path() -> PathBuf {
-    home().join(".claude.json")
+    claude_json_path_at(&home())
 }
 
 fn claude_settings_path() -> PathBuf {
-    home().join(".claude").join("settings.json")
+    claude_settings_path_at(&home())
 }
 
 fn codex_hooks_path() -> PathBuf {
-    home().join(".codex").join("hooks.json")
+    codex_hooks_path_at(&home())
 }
 
 fn codex_config_path() -> PathBuf {
-    home().join(".codex").join("config.toml")
+    codex_config_path_at(&home())
+}
+
+fn claude_json_path_at(home_root: &std::path::Path) -> PathBuf {
+    home_root.join(".claude.json")
+}
+
+fn claude_settings_path_at(home_root: &std::path::Path) -> PathBuf {
+    home_root.join(".claude").join("settings.json")
+}
+
+fn codex_hooks_path_at(home_root: &std::path::Path) -> PathBuf {
+    home_root.join(".codex").join("hooks.json")
+}
+
+fn codex_config_path_at(home_root: &std::path::Path) -> PathBuf {
+    home_root.join(".codex").join("config.toml")
 }
 
 fn ensure_codex_hooks_feature() -> Result<(), String> {
@@ -92,21 +110,40 @@ pub struct DiscoveredExt {
 pub fn scan_extensions(conn: &Connection) -> Vec<ExtensionRow> {
     let mut found: Vec<DiscoveredExt> = Vec::new();
 
-    // Claude MCP — ~/.claude.json mcpServers
-    let cj = read_json(&claude_json_path());
-    if let Some(servers) = cj.get("mcpServers").and_then(|v| v.as_object()) {
-        for (name, cfg) in servers {
-            let id = format!("mcp:claude:{}", name);
-            let cmd = cfg.get("command").and_then(|v| v.as_str()).unwrap_or("");
-            let desc = format!("{}", cmd);
+    // MCP entries now have one source of truth: each enabled Agent's registry row,
+    // with canonical Claude/Codex locations supplied by agent_config.
+    for agent in db_enabled_agents(conn) {
+        let Ok(target) = agent_config::mcp_target_for_agent(&agent, &home()) else {
+            continue;
+        };
+        let Ok(entries) = agent_config::read_mcp_entries(&target) else {
+            continue;
+        };
+        for (name, config_json) in entries {
+            let config: serde_json::Value =
+                serde_json::from_str(&config_json).unwrap_or(serde_json::json!({}));
+            let enabled = if target.format == McpConfigFormat::CodexToml {
+                config
+                    .get("enabled")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(true)
+            } else {
+                true
+            };
+            let description = config
+                .get("command")
+                .or_else(|| config.get("url"))
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string();
             found.push(DiscoveredExt {
-                id,
+                id: format!("mcp:{}:{}", agent.id, name),
                 kind: "mcp".into(),
-                runtime: "claude".into(),
-                name: name.clone(),
-                config_json: cfg.to_string(),
-                enabled: true,
-                description: desc,
+                runtime: agent.id.clone(),
+                name,
+                config_json,
+                enabled,
+                description,
             });
         }
     }
@@ -409,8 +446,31 @@ pub fn toggle_extension(conn: &Connection, id: &str, enabled: bool) -> Result<()
     let (kind, runtime, name, config_json) = row;
 
     match (kind.as_str(), runtime.as_str()) {
-        ("mcp", "claude") => toggle_claude_mcp(&name, &config_json, enabled)?,
-        ("mcp", "codex") => toggle_codex_mcp(&name, enabled)?,
+        ("mcp", _) => {
+            let target = agent_config::mcp_target(conn, &runtime)?;
+            if enabled || target.format != McpConfigFormat::CodexToml {
+                agent_config::upsert_mcp_entry(
+                    &target,
+                    &name,
+                    &config_json,
+                    None,
+                    !enabled,
+                )?;
+            } else {
+                let mut config: serde_json::Value =
+                    serde_json::from_str(&config_json).unwrap_or_else(|_| serde_json::json!({}));
+                if let Some(object) = config.as_object_mut() {
+                    object.insert("enabled".to_string(), serde_json::Value::Bool(false));
+                }
+                agent_config::upsert_mcp_entry(
+                    &target,
+                    &name,
+                    &config.to_string(),
+                    None,
+                    false,
+                )?;
+            }
+        }
         ("hook", "claude") => toggle_claude_hook(&name, &config_json, enabled)?,
         ("hook", "codex") => toggle_codex_hook(&name, &config_json, enabled)?,
         ("plugin", "codex") => toggle_codex_plugin(&config_json, enabled)?,
@@ -427,8 +487,14 @@ pub fn toggle_extension(conn: &Connection, id: &str, enabled: bool) -> Result<()
     Ok(())
 }
 
-fn toggle_claude_mcp(name: &str, config_json: &str, enabled: bool) -> Result<(), String> {
-    let path = claude_json_path();
+#[cfg_attr(not(test), allow(dead_code))]
+fn toggle_claude_mcp_at(
+    home_root: &std::path::Path,
+    name: &str,
+    config_json: &str,
+    enabled: bool,
+) -> Result<(), String> {
+    let path = claude_json_path_at(home_root);
     let mut root = read_json(&path);
     let servers = root
         .get_mut("mcpServers")
@@ -444,8 +510,9 @@ fn toggle_claude_mcp(name: &str, config_json: &str, enabled: bool) -> Result<(),
     write_json(&path, &root)
 }
 
-fn toggle_codex_mcp(name: &str, enabled: bool) -> Result<(), String> {
-    let path = codex_config_path();
+#[cfg_attr(not(test), allow(dead_code))]
+fn toggle_codex_mcp_at(home_root: &std::path::Path, name: &str, enabled: bool) -> Result<(), String> {
+    let path = codex_config_path_at(home_root);
     let raw = fs::read_to_string(&path).unwrap_or_default();
     let mut doc: toml::Value = toml::from_str(&raw).map_err(|e| e.to_string())?;
     if let Some(servers) = doc.get_mut("mcp_servers").and_then(|v| v.as_table_mut()) {
@@ -525,6 +592,14 @@ fn toggle_codex_hook(event: &str, config_json: &str, enabled: bool) -> Result<()
 }
 
 fn toggle_codex_plugin(config_json: &str, enabled: bool) -> Result<(), String> {
+    toggle_codex_plugin_at(&home(), config_json, enabled)
+}
+
+fn toggle_codex_plugin_at(
+    home_root: &std::path::Path,
+    config_json: &str,
+    enabled: bool,
+) -> Result<(), String> {
     let cfg: serde_json::Value =
         serde_json::from_str(config_json).unwrap_or(serde_json::json!({}));
     let full_name = cfg
@@ -532,7 +607,7 @@ fn toggle_codex_plugin(config_json: &str, enabled: bool) -> Result<(), String> {
         .and_then(|v| v.as_str())
         .ok_or("missing full_name")?;
 
-    let path = codex_config_path();
+    let path = codex_config_path_at(home_root);
     let raw = fs::read_to_string(&path).unwrap_or_default();
     let mut doc: toml::Value = toml::from_str(&raw).map_err(|e| e.to_string())?;
     let plugins = doc
@@ -559,7 +634,7 @@ fn toggle_codex_plugin(config_json: &str, enabled: bool) -> Result<(), String> {
 
 // ============ save MCP ============
 
-fn json_to_toml(value: &serde_json::Value) -> Result<toml::Value, String> {
+pub(crate) fn json_to_toml(value: &serde_json::Value) -> Result<toml::Value, String> {
     match value {
         serde_json::Value::Object(map) => {
             let mut table = toml::value::Table::new();
@@ -611,64 +686,25 @@ pub fn save_mcp(conn: &Connection, input: &McpServerInput) -> Result<(), String>
     let old_name = input.old_name.as_deref().map(str::trim).unwrap_or(&name);
     let old_id = format!("mcp:{}:{}", runtime, old_name);
 
-    match runtime.as_str() {
-        "claude" => {
-            let path = claude_json_path();
-            let mut root = read_json(&path);
-            let servers = root
-                .get_mut("mcpServers")
-                .and_then(|v| v.as_object_mut())
-                .ok_or("mcpServers not found")?;
-            if old_name != name {
-                servers.remove(old_name);
-            }
-            servers.insert(name.clone(), cfg.clone());
-            write_json(&path, &root)?;
+    let target = agent_config::mcp_target(conn, &runtime)?;
+    agent_config::upsert_mcp_entry(
+        &target,
+        &name,
+        &cfg.to_string(),
+        if old_name != name { Some(old_name) } else { None },
+        false,
+    )?;
 
-            if old_name != name {
-                conn.execute("DELETE FROM extensions WHERE id=?1", params![old_id]).ok();
-            }
-            conn.execute(
-                "INSERT INTO extensions (id, kind, runtime, name, config_json, enabled, description, source, created_at, updated_at)
-                 VALUES (?1,'mcp',?2,?3,?4,1,?5,'manual',?6,?6)
-                 ON CONFLICT(id) DO UPDATE SET config_json=excluded.config_json, description=excluded.description, updated_at=excluded.updated_at",
-                params![id, runtime, name, cfg.to_string(), mcp_description(&cfg), now_iso()],
-            )
-            .ok();
-        }
-        "codex" => {
-            let path = codex_config_path();
-            let raw = fs::read_to_string(&path).unwrap_or_default();
-            let mut doc: toml::Value = toml::from_str(&raw).map_err(|e| e.to_string())?;
-            let servers = doc
-                .get_mut("mcp_servers")
-                .and_then(|v| v.as_table_mut())
-                .ok_or("mcp_servers not found")?;
-            if old_name != name {
-                servers.remove(old_name);
-            }
-            let server_value = json_to_toml(&cfg)?;
-            let table = match server_value {
-                toml::Value::Table(table) => table,
-                _ => return Err("MCP server configuration must be a JSON object".into()),
-            };
-            servers.insert(name.clone(), toml::Value::Table(table));
-            let out = toml::to_string_pretty(&doc).map_err(|e| e.to_string())?;
-            fs::write(&path, out).map_err(|e| e.to_string())?;
-
-            if old_name != name {
-                conn.execute("DELETE FROM extensions WHERE id=?1", params![old_id]).ok();
-            }
-            conn.execute(
-                "INSERT INTO extensions (id, kind, runtime, name, config_json, enabled, description, source, created_at, updated_at)
-                 VALUES (?1,'mcp',?2,?3,?4,1,?5,'manual',?6,?6)
-                 ON CONFLICT(id) DO UPDATE SET config_json=excluded.config_json, description=excluded.description, updated_at=excluded.updated_at",
-                params![id, runtime, name, cfg.to_string(), mcp_description(&cfg), now_iso()],
-            )
-            .ok();
-        }
-        _ => return Err(format!("unsupported runtime: {}", runtime)),
+    if old_name != name {
+        conn.execute("DELETE FROM extensions WHERE id=?1", params![old_id]).ok();
     }
+    conn.execute(
+        "INSERT INTO extensions (id, kind, runtime, name, config_json, enabled, description, source, created_at, updated_at)
+         VALUES (?1,'mcp',?2,?3,?4,1,?5,'manual',?6,?6)
+         ON CONFLICT(id) DO UPDATE SET config_json=excluded.config_json, description=excluded.description, updated_at=excluded.updated_at",
+        params![id, runtime, name, cfg.to_string(), mcp_description(&cfg), now_iso()],
+    )
+    .ok();
 
     log_activity(conn, "mcp_save", &name);
     Ok(())
@@ -718,23 +754,9 @@ pub fn delete_extension(conn: &Connection, id: &str) -> Result<(), String> {
 
     // Remove from config file
     match (kind.as_str(), runtime.as_str()) {
-        ("mcp", "claude") => {
-            let path = claude_json_path();
-            let mut root = read_json(&path);
-            if let Some(servers) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
-                servers.remove(&name);
-            }
-            write_json(&path, &root)?;
-        }
-        ("mcp", "codex") => {
-            let path = codex_config_path();
-            let raw = fs::read_to_string(&path).unwrap_or_default();
-            let mut doc: toml::Value = toml::from_str(&raw).map_err(|e| e.to_string())?;
-            if let Some(servers) = doc.get_mut("mcp_servers").and_then(|v| v.as_table_mut()) {
-                servers.remove(&name);
-            }
-            let out = toml::to_string_pretty(&doc).map_err(|e| e.to_string())?;
-            fs::write(&path, out).map_err(|e| e.to_string())?;
+        ("mcp", _) => {
+            let target = agent_config::mcp_target(conn, &runtime)?;
+            agent_config::upsert_mcp_entry(&target, &name, "{}", None, true)?;
         }
         ("hook", "claude") => {
             toggle_claude_hook(&name, &config_json, false)?;
@@ -765,7 +787,7 @@ pub fn delete_extension(conn: &Connection, id: &str) -> Result<(), String> {
 
 // ============ tauri commands ============
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_ext(db: State<DbState>) -> Result<Vec<ExtensionRow>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     Ok(scan_extensions(&conn))
@@ -844,5 +866,200 @@ pub fn ext_config_path(db: State<DbState>, id: String) -> Result<String, String>
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|_| "extension not found".to_string())?;
+    if kind == "mcp" {
+        return Ok(crate::agent_config::mcp_target(&conn, &runtime)?.path);
+    }
     Ok(config_file_path(&kind, &runtime))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("skilldeck-ext-{name}-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn hook_config(command: &str) -> String {
+        serde_json::json!({
+            "matcher": "Bash",
+            "command": command,
+            "timeout": 15
+        })
+        .to_string()
+    }
+
+    fn entry(command: &str) -> serde_json::Value {
+        serde_json::json!({
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": command, "timeout": 10}]
+        })
+    }
+
+    fn commands_under_event(root: &serde_json::Value, event: &str) -> Vec<String> {
+        root.get("hooks")
+            .and_then(|hooks| hooks.get(event))
+            .and_then(|entries| entries.as_array())
+            .map(|entries| {
+                entries
+                    .iter()
+                    .map(|entry| {
+                        entry
+                            .get("hooks")
+                            .and_then(|hooks| hooks.as_array())
+                            .and_then(|hooks| hooks.first())
+                            .and_then(|hook| hook.get("command"))
+                            .and_then(|command| command.as_str())
+                            .unwrap_or_default()
+                            .to_string()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn hook_disable_removes_only_matching_command_and_prunes_empty_event() {
+        let dir = temp_dir("hook-disable");
+        let path = dir.join("settings.json");
+        let mut root = serde_json::json!({
+            "unknownTopLevel": {"keep": true},
+            "hooks": {
+                "PreToolUse": [entry("remove-me"), entry("keep-me")],
+                "PostToolUse": [entry("other-event")]
+            }
+        });
+        write_json(&path, &root).unwrap();
+
+        toggle_agent_hook(
+            path.clone(),
+            "PreToolUse",
+            &hook_config("remove-me"),
+            false,
+        )
+        .unwrap();
+
+        root = read_json(&path);
+        assert_eq!(
+            commands_under_event(&root, "PreToolUse"),
+            vec!["keep-me".to_string()]
+        );
+        assert_eq!(
+            commands_under_event(&root, "PostToolUse"),
+            vec!["other-event".to_string()]
+        );
+        assert!(root.get("unknownTopLevel").is_some());
+
+        toggle_agent_hook(path, "PreToolUse", &hook_config("keep-me"), false).unwrap();
+        root = read_json(&dir.join("settings.json"));
+        assert!(root.get("hooks").unwrap().get("PreToolUse").is_none());
+        assert!(root.get("hooks").unwrap().get("PostToolUse").is_some());
+    }
+
+    #[test]
+    fn hook_enable_is_idempotent_and_preserves_unknown_fields() {
+        let dir = temp_dir("hook-enable");
+        let path = dir.join("hooks.json");
+        let root = serde_json::json!({
+            "$schema": "keep",
+            "hooks": {
+                "Stop": [entry("existing")]
+            }
+        });
+        write_json(&path, &root).unwrap();
+
+        for _ in 0..2 {
+            toggle_agent_hook(path.clone(), "PreToolUse", &hook_config("new-hook"), true)
+                .unwrap();
+        }
+
+        let updated = read_json(&path);
+        assert_eq!(
+            commands_under_event(&updated, "PreToolUse"),
+            vec!["new-hook".to_string()]
+        );
+        assert_eq!(
+            commands_under_event(&updated, "Stop"),
+            vec!["existing".to_string()]
+        );
+        assert_eq!(updated.get("$schema"), Some(&serde_json::json!("keep")));
+    }
+
+    #[test]
+    fn claude_mcp_disable_removes_only_target_server() {
+        let dir = temp_dir("claude-mcp");
+        let path = claude_json_path_at(&dir);
+        let root = serde_json::json!({
+            "unknownField": 1,
+            "mcpServers": {
+                "target": {"command": "target-bin"},
+                "other": {"command": "other-bin"}
+            }
+        });
+        write_json(&path, &root).unwrap();
+
+        toggle_claude_mcp_at(&dir, "target", r#"{"command":"target-bin"}"#, false).unwrap();
+
+        let updated = read_json(&path);
+        let servers = updated.get("mcpServers").unwrap();
+        assert!(servers.get("target").is_none());
+        assert!(servers.get("other").is_some());
+        assert_eq!(updated.get("unknownField"), Some(&serde_json::json!(1)));
+    }
+
+    #[test]
+    fn codex_mcp_toggle_updates_flag_and_preserves_other_sections() {
+        let dir = temp_dir("codex-mcp");
+        let path = codex_config_path_at(&dir);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"
+[mcp_servers.fetch]
+command = "mcp-fetch"
+
+[mcp_servers.other]
+command = "other-bin"
+
+[plugins]
+"vendor/name" = { enabled = true }
+
+[user_settings]
+theme = "dark"
+"#,
+        )
+        .unwrap();
+
+        toggle_codex_mcp_at(&dir, "fetch", false).unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        let doc: toml::Value = toml::from_str(&raw).unwrap();
+        assert_eq!(
+            doc.get("mcp_servers")
+                .unwrap()
+                .get("fetch")
+                .unwrap()
+                .get("enabled"),
+            Some(&toml::Value::Boolean(false))
+        );
+        assert!(doc.get("mcp_servers").unwrap().get("other").is_some());
+        assert!(doc.get("plugins").unwrap().get("vendor/name").is_some());
+        assert_eq!(
+            doc.get("user_settings").unwrap().get("theme"),
+            Some(&toml::Value::String("dark".into()))
+        );
+
+        toggle_codex_mcp_at(&dir, "fetch", true).unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        let doc: toml::Value = toml::from_str(&raw).unwrap();
+        assert!(doc
+            .get("mcp_servers")
+            .unwrap()
+            .get("fetch")
+            .unwrap()
+            .get("enabled")
+            .is_none());
+    }
 }

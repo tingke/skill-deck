@@ -66,7 +66,7 @@ thread_local! {
 
 /// 仅供测试：把暂存目录指到临时位置，避免读写真实应用数据目录。
 #[cfg(test)]
-fn set_staging_root(path: PathBuf) {
+pub(crate) fn set_staging_root(path: PathBuf) {
     STAGING_ROOT.with(|root| *root.borrow_mut() = Some(path));
 }
 
@@ -689,7 +689,7 @@ pub fn update_skill_impl(
 
 // ============ Tauri commands ============
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn install_skill(
     db: State<DbState>,
     source: SkillSourceInput,
@@ -700,7 +700,7 @@ pub fn install_skill(
     install_skill_impl(&conn, &source, &library_source_id, override_audit)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_skill(
     db: State<DbState>,
     skill_id: String,
@@ -711,7 +711,7 @@ pub fn update_skill(
     update_skill_impl(&conn, &skill_id, override_audit, allow_local_changes)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn check_skill_updates(
     db: State<DbState>,
     skill_ids: Vec<String>,

@@ -26,13 +26,15 @@
         }
       }
      ],
-     "security": {
-       "csp": null
-     }
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:5173 http://localhost:5173"
+    }
    },
    "bundle": {
      "active": true,
      "targets": "all",
+    "createUpdaterArtifacts": true,
      "icon": [
        "icons/32x32.png",
        "icons/128x128.png",
@@ -40,5 +42,13 @@
        "icons/icon.icns",
        "icons/icon.ico"
      ]
-   }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/tingke/skill-deck/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJBRDE0MzA2NkVBOENCODUKUldTRnk2aHVCa1BSS2xNbkRGSkNVbDI2NGQzdm42TE9iM0pKYVVaRVNBNy9PRUo4QWxQUTVUWWQK"
+    }
+  }
  }

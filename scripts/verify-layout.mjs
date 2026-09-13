@@ -5,7 +5,7 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const tauriConfig = JSON.parse(read("../src-tauri/tauri.conf.json"));
 const capabilities = JSON.parse(read("../src-tauri/capabilities/default.json"));
 const app = read("../src/App.tsx");
-const appStore = read("../src/stores/app.ts");
+const skillsStore = read("../src/stores/skills.ts");
 const skills = read("../src/views/SkillsView.tsx");
 const connectionDialog = read("../src/components/ConnectionConfirmationDialog.tsx");
 const skillDeleteDialog = read("../src/components/SkillDeleteDialog.tsx");
@@ -85,12 +85,12 @@ assert.ok(
 
 assert.match(skills, /data-testid="skills-left-drawer"/, "Skills left drawer must expose a test id");
 
-assert.doesNotMatch(appStore, /window\.confirm/, "Tauri WebView cannot rely on native confirm dialogs");
-assert.match(appStore, /connectionConfirmation/, "shared disconnect must use application confirmation state");
+assert.doesNotMatch(skillsStore, /window\.confirm/, "Tauri WebView cannot rely on native confirm dialogs");
+assert.match(skillsStore, /connectionConfirmation/, "shared disconnect must use application confirmation state");
 assert.match(connectionDialog, /data-testid="shared-disconnect-dialog"/, "shared disconnect confirmation must render an in-app dialog");
 assert.match(app, /<ConnectionConfirmationDialog/, "the shared disconnect dialog must be mounted by the app shell");
 assert.doesNotMatch(skills, /confirmDelete/, "skill deletion must not use local inline confirmation state");
-assert.match(appStore, /skillDeleteConfirmation/, "skill deletion must use explicit pending confirmation state");
+assert.match(skillsStore, /skillDeleteConfirmation/, "skill deletion must use explicit pending confirmation state");
 assert.match(app, /<SkillDeleteDialog/, "skill deletion must render an in-app confirmation dialog");
 assert.match(skillDeleteDialog, /data-testid="skill-delete-dialog"/, "skill deletion confirmation must expose a dialog test id");
 assert.match(skills, /testId="skill-detail-drawer"/, "Skills detail drawer must expose a test id");

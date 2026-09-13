@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
-import { useAppStore } from "../stores/app";
+import { useSkillsStore } from "../stores/skills";
+import { useExtensionsStore } from "../stores/extensions";
 import {
   toggleExt,
   saveMcpCmd,
@@ -16,8 +17,9 @@ const toast = () => useToastStore.getState();
 
 export default function MCPView() {
   const t = useT();
-  const { agentOptions, loadExtensions } = useAppStore();
-  const allExtensions = useAppStore((s) => s.extensions);
+  const agentOptions = useSkillsStore((s) => s.agentOptions);
+  const { loadExtensions } = useExtensionsStore();
+  const allExtensions = useExtensionsStore((s) => s.extensions);
   const extensions = useMemo(
     () => allExtensions.filter((e) => e.kind === "mcp"),
     [allExtensions],
@@ -40,14 +42,14 @@ export default function MCPView() {
 
   const handleToggle = async (ext: ExtensionRow) => {
     const next = !ext.enabled;
-    useAppStore.setState((s) => ({
+    useExtensionsStore.setState((s) => ({
       extensions: s.extensions.map((e) => (e.id === ext.id ? { ...e, enabled: next } : e)),
     }));
     try {
       await toggleExt(ext.id, next);
       toast().show(next ? t("ext.enabled") : t("ext.disabled"), "info");
     } catch (e) {
-      useAppStore.setState((s) => ({
+      useExtensionsStore.setState((s) => ({
         extensions: s.extensions.map((e) => (e.id === ext.id ? { ...e, enabled: !next } : e)),
       }));
       toast().show(t("common.operationFailed") + ": " + e, "error");

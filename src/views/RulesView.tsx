@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useAppStore } from "../stores/app";
+import { useAssetsStore } from "../stores/assets";
+import { useActivityStore } from "../stores/activity";
 import { saveRule, deleteRule, applyRule } from "../lib/tauri";
 import { Plus, Trash2, X, Search, ScrollText, Copy, Check, FileOutput, Edit3 } from "lucide-react";
 import type { Rule } from "../types";
@@ -13,7 +14,7 @@ const toast = () => useToastStore.getState();
 
 export default function RulesView() {
   const t = useT();
-  const { rules, loadRules } = useAppStore();
+  const { rules, loadRules } = useAssetsStore();
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Rule | null>(null);
   const deleteConfirmation = useDeleteConfirmation();
@@ -27,7 +28,7 @@ export default function RulesView() {
    try {
      await applyRule(id);
      toast().show(t("rules.written"));
-     await useAppStore.getState().loadActivity();
+     await useActivityStore.getState().loadActivity();
    } catch (e) {
      toast().show(t("rules.writeFailed", { msg: String(e) }), "error");
    }

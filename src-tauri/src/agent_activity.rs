@@ -21,6 +21,9 @@ const OBSERVER_EVENTS: &[&str] = &[
 const OBSERVER_MARKER: &str = "skilldeck-agent-observer";
 const MAX_ACTIVITY_TEXT: usize = 240;
 const ACTIVITY_JOURNAL_LIMIT: usize = 500;
+const MAX_ACTIVITY_JOURNAL_BYTES: u64 = 5 * 1024 * 1024;
+const MAX_RETAINED_ACTIVITY_EVENTS: usize = 5000;
+const ACTIVITY_READ_TAIL_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -398,6 +401,20 @@ pub fn parse_hook_payload(
 }
 
 pub fn append_activity_event(event: &AgentActivityEvent, journal: &Path) -> Result<(), String> {
+    append_activity_event_with_limits(
+        event,
+        journal,
+        MAX_ACTIVITY_JOURNAL_BYTES,
+        MAX_RETAINED_ACTIVITY_EVENTS,
+    )
+}
+
+fn append_activity_event_with_limits(
+    event: &AgentActivityEvent,
+    journal: &Path,
+    max_journal_bytes: u64,
+    retained_events: usize,
+) -> Result<(), String> {
     if let Some(parent) = journal.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -411,11 +428,31 @@ pub fn append_activity_event(event: &AgentActivityEvent, journal: &Path) -> Resu
     use std::io::Write;
     file.write_all(line.as_bytes())
         .map_err(|error| error.to_string())?;
+    if let Ok(metadata) = file.metadata() {
+        if metadata.len() > max_journal_bytes {
+            compact_activity_journal(journal, retained_events)?;
+        }
+    }
     Ok(())
 }
 
+/// 保留最近 N 条并原子重写日志。观察 Hook 可能多进程并发写入，
+/// 压缩瞬间新事件有小概率丢失；该日志仅用于展示，可接受 best-effort。
+fn compact_activity_journal(journal: &Path, retained_events: usize) -> Result<(), String> {
+    let content = fs::read_to_string(journal).map_err(|error| error.to_string())?;
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(retained_events);
+    let mut data = lines[start..].join("\n");
+    data.push('\n');
+    let temp = journal.with_extension("compact.tmp");
+    fs::write(&temp, data).map_err(|error| error.to_string())?;
+    fs::rename(&temp, journal).map_err(|error| error.to_string())
+}
+
 pub fn load_activity_events(journal: &Path, limit: usize) -> Vec<AgentActivityEvent> {
-    let content = fs::read_to_string(journal).unwrap_or_default();
+    let Some(content) = read_journal_tail(journal, ACTIVITY_READ_TAIL_BYTES) else {
+        return Vec::new();
+    };
     let mut events = content
         .lines()
         .filter_map(|line| serde_json::from_str::<AgentActivityEvent>(line).ok())
@@ -424,6 +461,22 @@ pub fn load_activity_events(journal: &Path, limit: usize) -> Vec<AgentActivityEv
     events.drain(..start);
     events.reverse();
     events
+}
+
+/// 只从文件尾部读取固定窗口，避免日志增长后每次轮询都全量读取。
+/// 从行中间开始的首个片段无法通过 JSON 解析，会被调用方的过滤自然丢弃。
+fn read_journal_tail(journal: &Path, max_bytes: u64) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = fs::File::open(journal).ok()?;
+    let length = file.metadata().ok()?.len();
+    if length == 0 {
+        return Some(String::new());
+    }
+    let take = length.min(max_bytes);
+    file.seek(SeekFrom::Start(length - take)).ok()?;
+    let mut bytes = Vec::with_capacity(take as usize);
+    file.read_to_end(&mut bytes).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 pub fn run_hook_cli() {
@@ -779,7 +832,7 @@ pub fn activity_snapshot(mut events: Vec<AgentActivityEvent>) -> AgentActivitySn
     AgentActivitySnapshot { events, tasks }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_hook_observer_status() -> Result<Vec<HookObserverStatus>, String> {
     let home = dirs::home_dir().ok_or_else(|| "home directory not found".to_string())?;
     ["claude", "codex"]
@@ -788,7 +841,7 @@ pub fn get_hook_observer_status() -> Result<Vec<HookObserverStatus>, String> {
         .collect()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_hook_observer_enabled(
     db: State<DbState>,
     agent: String,
@@ -808,7 +861,7 @@ pub fn set_hook_observer_enabled(
     Ok(status)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_agent_activity_snapshot() -> Result<AgentActivitySnapshot, String> {
     let events = load_activity_events(&activity_journal_path(), ACTIVITY_JOURNAL_LIMIT);
     Ok(activity_snapshot(events))
@@ -918,6 +971,77 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![2, 1]
         );
+    }
+
+    fn journal_event(second: i64) -> AgentActivityEvent {
+        AgentActivityEvent {
+            id: second.to_string(),
+            agent: "codex".into(),
+            session_id: "s".into(),
+            event: "PreToolUse".into(),
+            state: "working".into(),
+            project: "/repo".into(),
+            task_id: None,
+            task_title: None,
+            task_status: None,
+            task_progress: None,
+            step: None,
+            tool_name: None,
+            activity: None,
+            timestamp: second,
+        }
+    }
+
+    #[test]
+    fn journal_compacts_and_keeps_recent_events() {
+        let dir = temp_dir("journal-compaction");
+        let journal = dir.join("events.jsonl");
+        for second in 0..12 {
+            append_activity_event_with_limits(
+                &journal_event(second),
+                &journal,
+                1,
+                5,
+            )
+            .unwrap();
+        }
+        let raw = fs::read_to_string(&journal).unwrap();
+        assert_eq!(raw.lines().count(), 5);
+        let events = load_activity_events(&journal, ACTIVITY_JOURNAL_LIMIT);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.timestamp)
+                .collect::<Vec<_>>(),
+            vec![11, 10, 9, 8, 7]
+        );
+    }
+
+    #[test]
+    fn activity_reads_only_the_tail_window() {
+        let dir = temp_dir("journal-tail");
+        let journal = dir.join("events.jsonl");
+        for second in 0..30 {
+            append_activity_event(&journal_event(second), &journal).unwrap();
+        }
+        let one_line_len = fs::read_to_string(&journal)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .len() as u64;
+        let tail_bytes = one_line_len * 4;
+        let Some(content) = read_journal_tail(&journal, tail_bytes) else {
+            panic!("journal must be readable");
+        };
+        let parsed = content
+            .lines()
+            .filter_map(|line| serde_json::from_str::<AgentActivityEvent>(line).ok())
+            .count();
+        assert!(parsed <= 4, "tail window must not parse the full journal");
+        let events = load_activity_events(&journal, ACTIVITY_JOURNAL_LIMIT);
+        assert_eq!(events.len(), 30);
+        assert_eq!(events.first().unwrap().timestamp, 29);
     }
 
     #[test]

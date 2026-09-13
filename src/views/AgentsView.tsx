@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { useAppStore } from "../stores/app";
+import { useSkillsStore } from "../stores/skills";
+import { useExtensionsStore } from "../stores/extensions";
+import { useWorkspaceStore } from "../stores/workspace";
 import { saveAgent, deleteAgent, toggleAgent } from "../lib/tauri";
 import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
@@ -39,8 +41,9 @@ function colorOf(c: string) {
 
 export default function AgentsView() {
   const t = useT();
-  const { agents, skills, loadAgents } = useAppStore();
-  const extensions = useAppStore((s) => s.extensions);
+  const { agents, loadAgents } = useWorkspaceStore();
+  const skills = useSkillsStore((s) => s.skills);
+  const extensions = useExtensionsStore((s) => s.extensions);
   const [editing, setEditing] = useState<AgentRow | null>(null);
   const [creating, setCreating] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -51,7 +54,7 @@ export default function AgentsView() {
     try {
       await toggleAgent(agent.id, !agent.enabled);
       await loadAgents();
-      await useAppStore.getState().loadAgentOptions();
+      await useSkillsStore.getState().loadAgentOptions();
     } catch (e) {
       toast().show(t("common.toggleFailed", { msg: String(e) }), "error");
     }
@@ -62,7 +65,7 @@ export default function AgentsView() {
     try {
       await deleteAgent(agent.id);
       await loadAgents();
-      await useAppStore.getState().loadAgentOptions();
+      await useSkillsStore.getState().loadAgentOptions();
       toast().show(t("agents.deleted", { label: agent.label }), "info");
     } catch (e) {
       toast().show(t("common.deleteFailed", { msg: String(e) }), "error");
@@ -187,7 +190,7 @@ export default function AgentsView() {
           }}
        onDone={async () => {
          await loadAgents();
-         await useAppStore.getState().loadAgentOptions();
+         await useSkillsStore.getState().loadAgentOptions();
          setCreating(false);
             setEditing(null);
           }}

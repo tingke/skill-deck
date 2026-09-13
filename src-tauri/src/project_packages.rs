@@ -381,7 +381,7 @@ pub fn create_package_from_project(
         .ok_or_else(|| "created preset not found".to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_pkg_from_project(
     db: State<DbState>,
     project_id: String,

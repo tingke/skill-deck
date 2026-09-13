@@ -27,6 +27,12 @@ export default {
         "accent-hover":   "rgb(var(--c-accent-hover) / <alpha-value>)",
         "accent-fg":      "rgb(var(--c-accent-fg) / <alpha-value>)",
         "accent-inverse": "rgb(var(--c-accent-inverse) / <alpha-value>)",
+        "accent-soft":    "rgb(var(--c-accent-soft) / <alpha-value>)",
+
+        secondary:         "rgb(var(--c-secondary) / <alpha-value>)",
+        "secondary-soft":  "rgb(var(--indigo-400) / <alpha-value>)",
+        tertiary:          "rgb(var(--c-tertiary) / <alpha-value>)",
+        "tertiary-soft":   "rgb(var(--cyan-400) / <alpha-value>)",
 
         success:    "rgb(var(--c-success) / <alpha-value>)",
         danger:     "rgb(var(--c-danger) / <alpha-value>)",
@@ -66,6 +72,13 @@ export default {
       transitionDuration: {
         fast: "var(--duration-fast)",
         normal: "var(--duration-normal)",
+      },
+
+      backgroundImage: {
+        "gradient-brand": "var(--grad-brand)",
+        "gradient-brand-h": "var(--grad-brand-h)",
+        "gradient-aurora": "var(--grad-aurora)",
+        "gradient-soft": "var(--grad-soft)",
       },
 
       zIndex: {

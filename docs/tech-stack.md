@@ -18,7 +18,7 @@
 | 语言 | TypeScript 5.5，strict mode | 目标 ES2021；`npm run typecheck` 主要检查 `src/` |
 | 构建 | Vite 5 | 固定开发端口 5173，构建目标 ES2021 |
 | 样式 | Tailwind CSS 3.4 + 全局设计 token | token 和组件类主要在 `src/styles.css` 与 `tailwind.config.js` |
-| 状态 | Zustand 4 | 主状态在 `src/stores/app.ts`，Toast 独立在 `src/stores/toast.ts` |
+| 状态 | Zustand 4 | 按领域拆分在 `src/stores/`：ui、skills、assets、extensions、workspace、packages、activity、toast |
 | 图标 | lucide-react、simple-icons | 不引入组件库 |
 | 桌面 API | `@tauri-apps/api` 2 | invoke 统一包装在 `src/lib/tauri.ts` |
 
@@ -57,9 +57,9 @@
 
 ## 测试与质量工具
 
-- 前端测试：`node:test` + `node:assert/strict`，由 `scripts/run-unit-tests.mjs` 显式列测试文件。
+- 前端测试：`node:test` + `node:assert/strict`，由 `scripts/run-unit-tests.mjs` 自动发现 `tests/*.test.ts`。
 - 布局契约：`scripts/verify-layout.mjs` 做源代码与配置断言，不是浏览器 E2E。
-- Rust 测试：模块内 `#[cfg(test)]`，当前覆盖迁移、扫描、连接冲突、收纳、观察 Hook 和项目工具集。
+- Rust 测试：模块内 `#[cfg(test)]`，当前覆盖迁移、扫描、连接冲突、收纳、观察 Hook、项目工具集、扩展配置写入、工具集导入导出与备份恢复。
 - CI：`.github/workflows/ci.yml`。
 - 当前没有覆盖率阈值、pre-commit hook、格式化检查和 lint 配置。
 
@@ -77,6 +77,7 @@
 ## 本地数据与外部边界
 
 - 数据库和 JSONL 日志保存在 `dirs::data_dir()/skilldeck`。
+- WebView 启用 CSP；开发模式单独放宽 inline script 与 Vite HMR 端口。release 构建默认不启用 devtools，需要时用 cargo feature `devtools` 显式开启。
 - Skill 文件留在库源原位，Agent 入口用 symlink 接线。
 - 文件选择、备份恢复、连接和配置修改都发生在用户本机。
 - 除设置页更新检查访问 GitHub Releases 外，应用不依赖云端服务。

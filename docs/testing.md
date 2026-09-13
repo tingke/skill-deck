@@ -6,12 +6,12 @@
 
 | 命令 | 覆盖内容 | 当前基线 |
 | --- | --- | --- |
-| `npm test` | 纯 TypeScript 逻辑与 Zustand 确认流 | 16 个 Node test |
+| `npm test` | 纯 TypeScript 逻辑与 Zustand 确认流 | 17 个 Node test |
 | `npm run test:layout` | App shell、Skills 布局、Tauri 窗口、drag region、设计 token 契约 | 通过 |
 | `npm run typecheck` | TypeScript strict 检查 | 通过 |
 | `npm run build` | typecheck + Vite production build | CI 前端必跑 |
 | `cd src-tauri && cargo check --locked` | Rust 编译与依赖检查 | CI 必跑 |
-| `cd src-tauri && cargo test --locked` | Rust 域逻辑和迁移 | 当前 43 个测试 |
+| `cd src-tauri && cargo test --locked` | Rust 域逻辑和迁移 | 当前 65 个测试 |
 
 ## 前端单元测试
 
@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 ```
 
-`scripts/run-unit-tests.mjs` 显式列出每个测试入口，用 esbuild bundle 到临时目录，再调用 `node --test`。新增测试时必须同步把入口加入该脚本。
+`scripts/run-unit-tests.mjs` 自动发现 `tests/*.test.ts`，用 esbuild bundle 到临时目录，再调用 `node --test`。新增测试文件无需修改脚本；文件名必须以 `.test.ts` 结尾。
 
 ### 适合前端测试的逻辑
 
@@ -57,6 +57,10 @@ import test from "node:test";
   - 安装来源 fetch、暂存落盘、zip 路径穿越拒绝、冲突不覆盖与更新回滚
   - symlink、真实目录、真实文件和共享链接冲突
   - 收纳真实入口时的失败回退
+  - MCP/Hook/Plugin 配置写入：只改目标条目、保留未知字段、幂等启用与空事件清理
+- 工具集导出/导入 round-trip、manifest 解析边界与应用到项目的落地行为
+- Agent MCP 配置目标、Package 应用计划、路径穿越拒绝、覆盖确认、导出脱敏和自包含导入
+  - 数据库备份复制、恢复替换旧数据、旧备份缺表时跳过
   - 用户配置合并、幂等和只删除自有 marker
   - 项目工具集提取与更新
 - 使用临时数据库/目录，不读写真实 `~`、应用数据目录或用户 Agent 配置。

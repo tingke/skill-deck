@@ -61,14 +61,14 @@ pub fn get_home_directory() -> String {
 #[tauri::command]
 pub fn get_runtimes(db: State<DbState>) -> Result<Vec<RuntimeInfo>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let home = dirs::home_dir().ok_or("无法确定用户主目录")?;
     Ok(db_enabled_agents(&conn)
         .into_iter()
         .map(|a| RuntimeInfo {
             id: a.id,
             label: a.label,
             color: a.color,
-            default_dir: dirs::home_dir()
-                .unwrap()
+            default_dir: home
                 .join(&a.skills_dir)
                 .to_string_lossy()
                 .to_string(),
@@ -84,7 +84,7 @@ pub fn get_runtimes(db: State<DbState>) -> Result<Vec<RuntimeInfo>, String> {
 
 /// 同步 DB 连接状态与实际文件系统：扫描所有 runtime 的 skills 目录，
 /// 如果 symlink 存在但 DB 未标记为 linked（或反之），修正 DB
-#[tauri::command]
+#[tauri::command(async)]
 pub fn verify_connections(db: State<DbState>) -> Result<Vec<SkillRow>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let agents = db_enabled_agents(&conn);
@@ -107,7 +107,7 @@ pub fn get_skill_connections(
     ))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn adopt_real_entry(
     db: State<DbState>,
     skill_id: String,
@@ -132,9 +132,10 @@ pub fn adopt_real_entry(
 /// 获取 Runtime 的 skills 目录（默认 ~/.<agent>/skills）
 pub(crate) fn runtime_skills_dir(runtime: &str, conn: &rusqlite::Connection) -> PathBuf {
     let key = format!("{}_skills_dir", runtime);
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let default = db_agent_by_id(conn, runtime)
-        .map(|a| dirs::home_dir().unwrap().join(&a.skills_dir))
-        .unwrap_or_else(|| dirs::home_dir().unwrap().join(runtime));
+        .map(|a| home.join(&a.skills_dir))
+        .unwrap_or_else(|| home.join(runtime));
     let custom: Option<String> = conn
         .query_row(
             "SELECT value FROM settings WHERE key = ?1",
@@ -149,7 +150,7 @@ pub(crate) fn runtime_skills_dir(runtime: &str, conn: &rusqlite::Connection) -> 
 }
 
 /// 扫描所有 runtime 目录，刷新 skill 列表
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_all(db: State<DbState>, log: Option<bool>) -> Result<Vec<SkillRow>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
@@ -351,7 +352,7 @@ pub fn batch_connect(
 }
 
 /// 读取 SKILL.md 内容
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_skill_file(db: State<DbState>, skill_id: String) -> Result<String, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let path: String = conn
@@ -368,7 +369,7 @@ pub fn read_skill_file(db: State<DbState>, skill_id: String) -> Result<String, S
 }
 
 /// 写入 SKILL.md 内容
-#[tauri::command]
+#[tauri::command(async)]
 pub fn write_skill_file(
     db: State<DbState>,
     skill_id: String,
@@ -414,7 +415,7 @@ pub fn get_recent_activity(db: State<DbState>) -> Result<Vec<ActivityLog>, Strin
 // ===================== Skill management =====================
 
 /// 删除 skill：删除实际目录 + 移除所有 runtime 的 symlink + 清理 DB
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_skill(db: State<DbState>, skill_id: String) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
@@ -698,7 +699,7 @@ fn build_file_tree(dir: &Path, base: &Path) -> Vec<SkillFileEntry> {
 }
 
 /// List all files in a skill directory as a tree
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_skill_files(
     db: State<DbState>,
     skill_id: String,
@@ -716,7 +717,7 @@ pub fn list_skill_files(
 }
 
 /// Read a specific file in a skill directory by relative path
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_skill_file_path(
     db: State<DbState>,
     skill_id: String,
@@ -1073,7 +1074,7 @@ fn upsert_scanned_rule(
 }
 
 /// Scan each agent's config dir for rule files and import into the rules table.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_rules(db: State<DbState>) -> Result<Vec<RuleRow>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let agents = db_enabled_agents(&conn);
@@ -1120,7 +1121,10 @@ pub fn scan_rules(db: State<DbState>) -> Result<Vec<RuleRow>, String> {
                     Ok(c) => c,
                     Err(_) => continue,
                 };
-                let fname = p.file_name().unwrap().to_string_lossy().to_string();
+                let fname = p
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default();
                 let abs = p.to_string_lossy().to_string();
                 new_count += upsert_scanned_rule(
                     &conn,

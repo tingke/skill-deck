@@ -138,7 +138,13 @@ export const scanRules = () =>
   invoke<Rule[]>("scan_rules");
 
 // ===================== Packages (工具集) =====================
-import type { PackageRow, PackageDetail, PackageInput } from "../types";
+import type {
+  PackageRow,
+  PackageDetail,
+  PackageInput,
+  PackageApplyPlan,
+  PackageExportResult,
+} from "../types";
 
 export const getPackages = () =>
   invoke<PackageRow[]>("get_packages");
@@ -155,11 +161,26 @@ export const deletePkg = (id: string) =>
 export const applyPkg = (id: string, agentId: string) =>
   invoke("apply_pkg", { id, runtime: agentId });
 
-export const exportPkg = (id: string, destDir?: string) =>
-  invoke<string>("export_pkg", { id, destDir: destDir ?? null });
+export const previewPkg = (id: string, agentId: string) =>
+  invoke<PackageApplyPlan>("preview_pkg", { id, runtime: agentId });
 
-export const importPkg = (zipPath: string) =>
-  invoke<string>("import_pkg", { zipPath });
+export const exportPkg = (id: string, destDir?: string, includeSecrets = false) =>
+  invoke<PackageExportResult>("export_pkg", {
+    id,
+    destDir: destDir ?? null,
+    includeSecrets,
+  });
+
+export const importPkg = (
+  zipPath: string,
+  librarySourceId?: string,
+  overrideAudit = false,
+) =>
+  invoke<string>("import_pkg", {
+    zipPath,
+    librarySourceId: librarySourceId ?? null,
+    overrideAudit,
+  });
 
 export const pickFolder = () =>
   invoke<string | null>("pick_folder");
@@ -167,8 +188,12 @@ export const pickFolder = () =>
 export const pickSaveFolder = () =>
   invoke<string | null>("pick_save_folder");
 
-export const applyPkgToProject = (id: string, projectPath: string) =>
-  invoke("apply_pkg_to_project", { id, projectPath });
+export const applyPkgToProject = (
+  id: string,
+  projectPath: string,
+  confirmedOverwrite = false,
+) =>
+  invoke("apply_pkg_to_project", { id, projectPath, confirmedOverwrite });
 
 export const createPkgFromProject = (projectId: string) =>
   invoke<PackageRow>("create_pkg_from_project", { projectId });
@@ -251,7 +276,7 @@ export const extConfigPath = (id: string) =>
   invoke<string>("ext_config_path", { id });
 
 // ===================== Settings =====================
-import type { AppInfo, UpdateInfo } from "../types";
+import type { AppInfo } from "../types";
 
 export const getAppInfo = () =>
   invoke<AppInfo>("get_app_info");
@@ -274,5 +299,10 @@ export const pickBackupFolder = () =>
 export const pickBackupFile = () =>
   invoke<string | null>("pick_backup_file");
 
-export const checkUpdate = () =>
-  invoke<UpdateInfo>("check_update");
+// ===================== App 更新 (updater 插件) =====================
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
+
+export const checkAppUpdate = () => check();
+export type { Update };
+export const relaunchApp = () => relaunch();

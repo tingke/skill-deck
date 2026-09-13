@@ -17,12 +17,15 @@ export default function ToastContainer() {
         return (
           <div
             key={t.id}
-            className="flex items-center gap-2 bg-surface border border-border-strong rounded-lg shadow-lg px-4 py-2.5 min-w-[200px] max-w-[360px] animate-in"
+            className={
+              "toast-item flex items-center gap-2.5 rounded-lg pl-4 pr-3 py-2.5 min-w-[200px] max-w-[360px] " +
+              "toast-" + t.type
+            }
             style={{ animation: "toast-in 0.2s ease-out" }}
           >
             <Icon size={16} className={classes + " shrink-0"} />
             <span className="text-sm text-content dark:text-content flex-1">{t.message}</span>
-            <button onClick={() => dismiss(t.id)} className="text-faint hover:text-muted shrink-0">
+            <button onClick={() => dismiss(t.id)} className="text-faint hover:text-muted shrink-0 transition-colors">
               <X size={14} />
             </button>
           </div>

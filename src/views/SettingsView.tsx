@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
-import { useAppStore } from "../stores/app";
+import { useUiStore } from "../stores/ui";
+import { useSkillsStore } from "../stores/skills";
+import { useAssetsStore } from "../stores/assets";
+import { useExtensionsStore } from "../stores/extensions";
+import { useWorkspaceStore } from "../stores/workspace";
+import { usePackagesStore } from "../stores/packages";
+import { useActivityStore } from "../stores/activity";
 import { useToastStore } from "../stores/toast";
 import { useT, useI18n, LANGS, type Lang } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import * as api from "../lib/tauri";
 import { formatSkillPath } from "../lib/skillPaths";
-import type { AppInfo, UpdateInfo } from "../types";
+import type { AppInfo } from "../types";
 import { useDeleteConfirmation } from "../lib/deleteConfirmation";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
 import {
@@ -64,7 +70,8 @@ function LibrarySourceRow({
 
 function LibrarySourcesSection() {
   const t = useT();
-  const { librarySources, skills, loadLibrarySources, loadSkills, scanNow } = useAppStore();
+  const { librarySources, loadLibrarySources } = useWorkspaceStore();
+  const { skills, loadSkills, scanNow } = useSkillsStore();
   const deleteConfirmation = useDeleteConfirmation();
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -234,7 +241,9 @@ function LibrarySourcesSection() {
 
 export default function SettingsView() {
   const t = useT();
-  const { theme, setTheme, librarySources, skills, loadLibrarySources, loadSkills } = useAppStore();
+  const { theme, setTheme } = useUiStore();
+  const { librarySources, loadLibrarySources } = useWorkspaceStore();
+  const { skills, loadSkills } = useSkillsStore();
 
   // Launch at login
   const [autostart, setAutostart] = useState(false);
@@ -252,17 +261,46 @@ export default function SettingsView() {
 
   // App info + update
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [update, setUpdate] = useState<api.Update | null>(null);
+  const [updatePhase, setUpdatePhase] = useState<"idle" | "downloading" | "downloaded">("idle");
+  const [progress, setProgress] = useState(0);
   const [checking, setChecking] = useState(false);
   useEffect(() => { api.getAppInfo().then(setAppInfo).catch(() => {}); }, []);
   const handleCheckUpdate = async () => {
     setChecking(true);
     try {
-      const info = await api.checkUpdate();
-      setUpdateInfo(info);
+      const found = await api.checkAppUpdate();
+      setUpdate(found);
+      setUpdatePhase("idle");
+      setProgress(0);
+      if (!found) toast().show(t("settings.upToDate"));
     } catch {
       toast().show(t("settings.checkFailed"), "error");
     } finally { setChecking(false); }
+  };
+
+  const handleDownloadUpdate = async () => {
+    if (!update) return;
+    setUpdatePhase("downloading");
+    setProgress(0);
+    try {
+      let total = 0;
+      let received = 0;
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          total = event.data.contentLength ?? 0;
+        } else if (event.event === "Progress") {
+          received += event.data.chunkLength;
+          if (total > 0) setProgress(Math.min(100, Math.round((received / total) * 100)));
+        } else if (event.event === "Finished") {
+          setProgress(100);
+        }
+      });
+      setUpdatePhase("downloaded");
+    } catch {
+      setUpdatePhase("idle");
+      toast().show(t("settings.updateFailed"), "error");
+    }
   };
 
   // Backup / restore
@@ -283,16 +321,16 @@ export default function SettingsView() {
       toast().show(t("toast.restoreDone"));
       // reload all data into the store after restore
       await Promise.all([
-        useAppStore.getState().loadSkills(),
-        useAppStore.getState().loadPrompts(),
-        useAppStore.getState().loadRules(),
-        useAppStore.getState().loadPackages(),
-        useAppStore.getState().loadExtensions(),
-        useAppStore.getState().loadAgents(),
-        useAppStore.getState().loadProjects(),
-        useAppStore.getState().loadLibrarySources(),
-        useAppStore.getState().loadAgentOptions(),
-        useAppStore.getState().loadActivity(),
+        useSkillsStore.getState().loadSkills(),
+        useAssetsStore.getState().loadPrompts(),
+        useAssetsStore.getState().loadRules(),
+        usePackagesStore.getState().loadPackages(),
+        useExtensionsStore.getState().loadExtensions(),
+        useWorkspaceStore.getState().loadAgents(),
+        useWorkspaceStore.getState().loadProjects(),
+        useWorkspaceStore.getState().loadLibrarySources(),
+        useSkillsStore.getState().loadAgentOptions(),
+        useActivityStore.getState().loadActivity(),
       ]);
     } catch { toast().show(t("toast.restoreFailed"), "error"); }
   };
@@ -389,9 +427,16 @@ export default function SettingsView() {
             <p className="text-muted leading-relaxed pt-1">
               {t("settings.appDescription")}
             </p>
-            {updateInfo && !checking && (
+            {update && !checking && (
               <div className="pt-1">
-                <UpdateResult info={updateInfo} t={t} />
+                <UpdateResult
+                  update={update}
+                  phase={updatePhase}
+                  progress={progress}
+                  t={t}
+                  onDownload={handleDownloadUpdate}
+                  onRestart={() => { api.relaunchApp(); }}
+                />
               </div>
             )}
           </div>
@@ -466,21 +511,36 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
-function UpdateResult({ info, t }: { info: UpdateInfo; t: (k: TranslationKey, v?: Record<string, string | number>) => string }) {
-  if (info.not_configured) {
-    return <span className="text-[11px] text-faint">{t("settings.updateNotConfigured")}</span>;
-  }
-  if (info.has_update) {
-    return (
-      <a href={info.url} target="_blank" rel="noreferrer"
-        className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline">
-        {t("settings.newVersionAvailable", { version: info.latest })}
-      </a>
-    );
-  }
+function UpdateResult({
+  update, phase, progress, t, onDownload, onRestart,
+}: {
+  update: api.Update;
+  phase: "idle" | "downloading" | "downloaded";
+  progress: number;
+  t: (k: TranslationKey, v?: Record<string, string | number>) => string;
+  onDownload: () => void;
+  onRestart: () => void;
+}) {
   return (
-    <span className="flex items-center gap-1 text-[11px] text-green-600 dark:text-green-400">
-      <CheckCircle2 size={12} /> {t("settings.upToDate")}
-    </span>
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-[11px] text-blue-600 dark:text-blue-400">
+        {t("settings.newVersionAvailable", { version: update.version })}
+      </span>
+      {phase === "downloaded" ? (
+        <button onClick={onRestart} className="btn btn-outline btn-sm">
+          <CheckCircle2 size={13} /> {t("settings.restartToUpdate")}
+        </button>
+      ) : (
+        <button onClick={onDownload} disabled={phase === "downloading"} className="btn btn-outline btn-sm">
+          {phase === "downloading" ? (
+            <>
+              <Loader2 size={13} className="animate-spin" /> {t("settings.downloading", { percent: progress })}
+            </>
+          ) : (
+            <>{t("settings.downloadInstall")}</>
+          )}
+        </button>
+      )}
+    </div>
   );
 }

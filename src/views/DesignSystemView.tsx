@@ -193,7 +193,7 @@ export default function DesignSystemView() {
                 <div className="flex items-center gap-2 mt-3">
                   <span className="badge text-white bg-orange-500">claude</span>
                   <span className="badge text-white bg-green-600">codex</span>
-                  <span className="badge text-violet-600 bg-violet-50 dark:bg-violet-900/30">tag</span>
+                  <span className="badge text-accent bg-accent-soft">tag</span>
                 </div>
               </div>
               <div className="card p-4">

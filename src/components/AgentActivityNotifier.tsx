@@ -4,7 +4,7 @@ import {
   diffAgentActivityNotifications,
   type AgentActivityNotification,
 } from "../lib/agentActivityNotifications";
-import { useAppStore } from "../stores/app";
+import { useActivityStore } from "../stores/activity";
 import { useToastStore, type ToastType } from "../stores/toast";
 import { useT } from "../i18n";
 import type { TranslationKey } from "../i18n";
@@ -68,14 +68,14 @@ export default function AgentActivityNotifier() {
   useEffect(() => {
     let cancelled = false;
     let hasBaseline = false;
-    let previous = useAppStore.getState().agentActivity;
+    let previous = useActivityStore.getState().agentActivity;
 
     const load = async () => {
       try {
         const snapshot = await getAgentActivitySnapshot();
         if (cancelled) return;
         const notifications = diffAgentActivityNotifications(previous, snapshot, { hasBaseline });
-        useAppStore.setState({ agentActivity: snapshot });
+        useActivityStore.setState({ agentActivity: snapshot });
         previous = snapshot;
         hasBaseline = true;
         for (const notification of notifications) {
