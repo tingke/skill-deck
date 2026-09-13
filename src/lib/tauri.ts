@@ -71,6 +71,12 @@ export const auditSkill = (skillId: string) =>
 export const getSkillAudit = (skillId: string) =>
   invoke<AuditReport>("get_skill_audit", { skillId });
 
+export const getAuditRules = () =>
+  invoke<import("../types").AuditRulesResponse>("get_audit_rules");
+
+export const auditSkillsBatch = (skillIds: string[] | null) =>
+  invoke<import("../types").SkillAuditSummary[]>("audit_skills_batch", { skillIds });
+
 // skill 安装 / 更新
 export const installSkill = (
   source: SkillSourceInput,

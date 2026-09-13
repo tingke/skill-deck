@@ -561,6 +561,7 @@ pub(crate) fn get_skill(conn: &Connection, skill_id: &str) -> Result<SkillRow, S
                 version: row.get(10)?,
                 permissions: serde_json::from_str(&row.get::<_, String>(11)?).unwrap_or_default(),
                 audit_verdict: None,
+                audit_score: None,
                 origin_type: None,
                 origin_ref: None,
             })
@@ -622,6 +623,7 @@ mod tests {
             version: String::new(),
             permissions: Vec::new(),
             audit_verdict: None,
+            audit_score: None,
             origin_type: None,
             origin_ref: None,
         }

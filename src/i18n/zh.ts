@@ -4,6 +4,7 @@ export const zh = {
   "nav.agents": "智能体",
   "nav.projects": "项目",
   "nav.skills": "技能",
+  "nav.audit": "审计",
   "nav.prompts": "提示词",
   "nav.rules": "规则",
   "nav.mcp": "MCP",

@@ -129,6 +129,8 @@ pub fn run() {
             // skill 安全审查
             skill_audit::audit_skill,
             skill_audit::get_skill_audit,
+            skill_audit::get_audit_rules,
+            skill_audit::audit_skills_batch,
             // skill 安装 / 更新
             skill_install::install_skill,
             skill_install::update_skill,

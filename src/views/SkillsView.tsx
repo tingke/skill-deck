@@ -17,7 +17,7 @@ import type { Skill, AgentInfo, SkillFileEntry, SkillConnectionState, InstallRes
 import { revealInFinder, readSkillFileByPath, batchConnect, getHomeDirectory, checkSkillUpdates, updateSkill } from "../lib/tauri";
 import { getDisconnectableSkillIds } from "../lib/skillBatch";
 import { formatSkillPath } from "../lib/skillPaths";
-import { auditVerdictMeta, INSTALL_STATUS_META, needsUserConfirm } from "../lib/skillAudit";
+import { auditVerdictMeta, scoreGradeMeta, INSTALL_STATUS_META, needsUserConfirm } from "../lib/skillAudit";
 import { buildBatchSharedDisconnectConfirmation } from "../lib/connectionConfirmation";
 import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
@@ -363,10 +363,20 @@ function ConnectionSummary({ connection }: { connection: SkillConnectionState })
   );
 }
 
-// ---- Audit section in detail panel ----
-function SkillAuditSection({ skillId }: { skillId: string }) {
+// ---- Audit section in detail panel：只显示状态，点击跳转审计详情 ----
+function SkillAuditSection({ skill }: { skill: Skill }) {
   const { skillAudit, auditingSkill, runSkillAudit } = useSkillsStore();
+  const setView = useUiStore((s) => s.setView);
+  const setAuditFocusSkillId = useUiStore((s) => s.setAuditFocusSkillId);
   const meta = skillAudit ? auditVerdictMeta(skillAudit.verdict) : null;
+  const grade = skillAudit
+    ? scoreGradeMeta(skillAudit.score)
+    : scoreGradeMeta(skill.audit_score);
+
+  const openAudit = () => {
+    setAuditFocusSkillId(skill.id);
+    setView("audit");
+  };
 
   return (
     <div className="px-5 py-3 border-b border-border-subtle">
@@ -374,23 +384,48 @@ function SkillAuditSection({ skillId }: { skillId: string }) {
         <ShieldCheck size={12} className="text-faint" />
         <span className="text-2xs font-semibold text-faint uppercase tracking-wider">安全审查</span>
         <button
-          onClick={() => runSkillAudit(skillId)}
+          onClick={(e) => {
+            e.stopPropagation();
+            runSkillAudit(skill.id);
+          }}
           disabled={auditingSkill}
           className="ml-auto flex items-center gap-1 text-2xs text-faint hover:text-accent transition-colors"
         >
           {auditingSkill ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} 重新审查
         </button>
       </div>
-      {skillAudit ? (
-        <div className="space-y-2">
-          <span className={"inline-block text-2xs px-2 py-0.5 rounded-md font-medium " + (meta?.badge ?? "")}>
-            {meta?.label ?? skillAudit.verdict}
+      <button
+        onClick={openAudit}
+        className="w-full flex items-center gap-2 rounded-lg border border-border-subtle bg-surface-2 px-3 py-2 text-left transition-colors hover:border-violet-300 dark:hover:border-violet-700 group"
+        title="查看审计详情"
+      >
+        {meta ? (
+          <span className={"text-2xs px-2 py-0.5 rounded-md font-medium " + meta.badge}>
+            {meta.label}
           </span>
-          <AuditFindings findings={skillAudit.findings} />
-        </div>
-      ) : (
-        <div className="text-2xs text-faint">尚未审查，点击「重新审查」开始静态安全检查</div>
-      )}
+        ) : (
+          <span className="text-2xs px-2 py-0.5 rounded-md bg-surface text-faint">未审查</span>
+        )}
+        {skillAudit && skillAudit.score != null && (
+          <span className="flex items-center gap-1">
+            <span className="text-xs font-mono font-semibold text-heading">{skillAudit.score}</span>
+            <span className="text-2xs text-faint">分</span>
+            {grade && (
+              <span className={"text-2xs px-1.5 py-0.5 rounded font-medium " + grade.badge}>
+                {grade.label}
+              </span>
+            )}
+          </span>
+        )}
+        {skillAudit && skillAudit.findings.length > 0 && (
+          <span className="text-2xs text-muted">
+            {skillAudit.findings.length} 个发现
+          </span>
+        )}
+        <span className="ml-auto flex items-center gap-0.5 text-2xs text-faint group-hover:text-violet-500 transition-colors">
+          审计详情 <ChevronRight size={11} />
+        </span>
+      </button>
     </div>
   );
 }
@@ -654,7 +689,7 @@ function SkillDetail() {
         </div>
 
         {/* audit */}
-        <SkillAuditSection skillId={skill.id} />
+        <SkillAuditSection skill={skill} />
 
         {/* origin & updates */}
         <SkillUpdateSection skill={skill} agentOptions={agentOptions} />

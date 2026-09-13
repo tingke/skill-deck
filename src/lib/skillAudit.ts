@@ -37,6 +37,36 @@ export function auditVerdictMeta(verdict: string | null | undefined) {
   return null;
 }
 
+/** 得分等级：≥90 优 / ≥75 良 / ≥60 中 / <60 差；未审查返回 null */
+export function scoreGradeMeta(score: number | null | undefined): {
+  label: string;
+  badge: string;
+} | null {
+  if (score == null) return null;
+  if (score >= 90) {
+    return {
+      label: "优",
+      badge: "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-300",
+    };
+  }
+  if (score >= 75) {
+    return {
+      label: "良",
+      badge: "text-sky-600 bg-sky-50 dark:bg-sky-900/30 dark:text-sky-300",
+    };
+  }
+  if (score >= 60) {
+    return {
+      label: "中",
+      badge: "text-amber-600 bg-amber-50 dark:bg-amber-900/30 dark:text-amber-300",
+    };
+  }
+  return {
+    label: "差",
+    badge: "text-red-600 bg-red-50 dark:bg-red-900/30 dark:text-red-300",
+  };
+}
+
 export const INSTALL_STATUS_META: Record<InstallStatus, { label: string; blocked: boolean }> = {
   installed: { label: "安装成功", blocked: false },
   updated: { label: "更新成功", blocked: false },

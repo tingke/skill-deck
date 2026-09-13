@@ -268,6 +268,7 @@ pub(crate) fn migrate(conn: &Connection) {
            content_hash TEXT NOT NULL,
            verdict      TEXT NOT NULL,
            findings     TEXT NOT NULL DEFAULT '[]',
+           score        INTEGER NOT NULL DEFAULT 100,
            created_at   TEXT NOT NULL
        );
        CREATE INDEX IF NOT EXISTS idx_skill_audits_skill
@@ -531,6 +532,27 @@ pub(crate) fn migrate(conn: &Connection) {
         }
     }
 
+    // Migration: add `score` column to skill_audits table（供列表展示，缓存加载时以 findings 现算为准）
+    {
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(skill_audits)")
+            .ok()
+            .map(|mut s| {
+                s.query_map([], |r| r.get::<_, String>(1))
+                    .ok()
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        if !cols.is_empty() && !cols.iter().any(|c| c == "score") {
+            conn.execute(
+                "ALTER TABLE skill_audits ADD COLUMN score INTEGER NOT NULL DEFAULT 100",
+                [],
+            )
+            .ok();
+        }
+    }
+
     // Migration: old presets table used skill_names column
     let has_skill_names: bool = {
         let cols: Vec<String> = conn
@@ -586,6 +608,34 @@ mod migration_tests {
             )
             .unwrap();
         assert_eq!(audit_count, 2);
+    }
+
+    #[test]
+    fn migrate_adds_score_column_to_existing_skill_audits() {
+        let conn = Connection::open_in_memory().unwrap();
+        // 模拟旧版库：skill_audits 已存在但没有 score 列
+        conn.execute(
+            "CREATE TABLE skill_audits (
+                id INTEGER PRIMARY KEY,
+                skill_id TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                findings TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+        migrate(&conn);
+
+        let has_score: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('skill_audits') WHERE name = 'score'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_score, 1);
     }
 
     #[test]
@@ -652,6 +702,7 @@ pub struct SkillRow {
     pub version: String,
     pub permissions: Vec<String>,
     pub audit_verdict: Option<String>,
+    pub audit_score: Option<i64>,
     pub origin_type: Option<String>,
     pub origin_ref: Option<String>,
 }

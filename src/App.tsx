@@ -8,6 +8,7 @@ import { usePackagesStore } from "./stores/packages";
 import { useActivityStore } from "./stores/activity";
 import DashboardView from "./views/DashboardView";
 import SkillsView from "./views/SkillsView";
+import AuditView from "./views/AuditView";
 import PackagesView from "./views/PackagesView";
 import MCPView from "./views/MCPView";
 import PluginsView from "./views/PluginsView";
@@ -22,7 +23,7 @@ import ToastContainer from "./components/Toast";
 import AgentActivityNotifier from "./components/AgentActivityNotifier";
 import ConnectionConfirmationDialog from "./components/ConnectionConfirmationDialog";
 import SkillDeleteDialog from "./components/SkillDeleteDialog";
-import { LayoutDashboard, FileText, Settings as SettingsIcon, BookOpen, Plug, Layers, Webhook, Server, Sun, Moon, Monitor, FolderKanban, PanelLeftClose, PanelLeftOpen, RefreshCw } from "lucide-react";
+import { LayoutDashboard, FileText, Settings as SettingsIcon, BookOpen, Plug, Layers, Webhook, Server, Sun, Moon, Monitor, FolderKanban, PanelLeftClose, PanelLeftOpen, RefreshCw, ShieldCheck } from "lucide-react";
 import { Cpu } from "lucide-react";
 import logoUrl from "./assets/logo.png";
 import type { ViewKey } from "./types";
@@ -109,6 +110,7 @@ export default function App() {
   const views: Record<ViewKey, React.ReactNode> = {
     dashboard: <DashboardView />,
     skills: <SkillsView />,
+    audit: <AuditView />,
     presets: <PackagesView />,
     prompts: <PromptsView />,
     rules: <RulesView />,
@@ -267,6 +269,7 @@ const items: { key: ViewKey; label: string; icon: React.ReactNode; badge?: numbe
    { key: "dashboard", label: t("nav.dashboard"), icon: <LayoutDashboard size={17} /> },
    { key: "agents", label: t("nav.agents"), icon: <Cpu size={17} />, badge: agents.length },
    { key: "skills", label: t("nav.skills"), icon: <BookOpen size={17} />, badge: skills.length },
+   { key: "audit", label: t("nav.audit"), icon: <ShieldCheck size={17} />, badge: skills.filter((s) => s.audit_verdict === "block").length || undefined },
    { key: "rules", label: t("nav.rules"), icon: <FileText size={17} />, badge: rules.length },
    { key: "mcp", label: t("nav.mcp"), icon: <Server size={17} />, badge: extensions.filter((e) => e.kind === "mcp").length },
    { key: "plugins", label: t("nav.plugins"), icon: <Plug size={17} />, badge: extensions.filter((e) => e.kind === "plugin").length },

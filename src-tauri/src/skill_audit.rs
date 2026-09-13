@@ -38,7 +38,123 @@ pub struct AuditReport {
     pub content_hash: String,
     pub verdict: AuditVerdict,
     pub findings: Vec<AuditFinding>,
+    pub score: i64,
     pub created_at: String,
+}
+
+/// 审计规则目录：暴露给审计页，说明每条规则审查什么、默认级别。
+#[derive(Clone, Debug, Serialize)]
+pub struct AuditRuleInfo {
+    pub rule_id: &'static str,
+    pub severity: AuditSeverity,
+    pub title: &'static str,
+    pub description: &'static str,
+}
+
+/// 与生成 finding 的规则一一对应；新增规则必须在这里登记。
+pub const AUDIT_RULES: &[AuditRuleInfo] = &[
+    AuditRuleInfo {
+        rule_id: "SEC-001",
+        severity: AuditSeverity::Block,
+        title: "凭据读取",
+        description: "检测内容中读取 SSH 私钥、云凭证、.env 环境变量等敏感凭据的指令",
+    },
+    AuditRuleInfo {
+        rule_id: "SEC-002",
+        severity: AuditSeverity::Block,
+        title: "破坏性命令",
+        description: "检测 rm -rf /、mkfs、dd 写裸设备等破坏性系统命令",
+    },
+    AuditRuleInfo {
+        rule_id: "SEC-003",
+        severity: AuditSeverity::Block,
+        title: "下载即执行",
+        description: "检测 curl/wget 下载内容直接管道进 shell 执行（需同一行同时出现）",
+    },
+    AuditRuleInfo {
+        rule_id: "SEC-004",
+        severity: AuditSeverity::Warn,
+        title: "持久化入口",
+        description: "检测写入 .zshrc/.bashrc/.profile、launchctl、crontab、LaunchAgents 等持久化机制",
+    },
+    AuditRuleInfo {
+        rule_id: "SEC-005",
+        severity: AuditSeverity::Warn,
+        title: "混淆执行",
+        description: "检测 base64 / openssl 解码执行与超长 base64 片段（疑似隐藏载荷）",
+    },
+    AuditRuleInfo {
+        rule_id: "SEC-006",
+        severity: AuditSeverity::Warn,
+        title: "提示注入",
+        description: "检测试图覆盖宿主指令的内容，如 ignore previous instructions 及其中文变体",
+    },
+    AuditRuleInfo {
+        rule_id: "SEC-007",
+        severity: AuditSeverity::Block,
+        title: "可执行二进制",
+        description: "检测 ELF / Mach-O 可执行文件，或带可执行位的二进制内容",
+    },
+    AuditRuleInfo {
+        rule_id: "SEC-008",
+        severity: AuditSeverity::Block,
+        title: "symlink 逃逸",
+        description: "检测 skill 目录内指向目录外部的 symlink 链接",
+    },
+    AuditRuleInfo {
+        rule_id: "SEC-009",
+        severity: AuditSeverity::Warn,
+        title: "打包压缩内容",
+        description: "检测 zip / tar 等压缩包，静态审查无法覆盖其内部内容",
+    },
+    AuditRuleInfo {
+        rule_id: "SEC-010",
+        severity: AuditSeverity::Warn,
+        title: "文件不可读",
+        description: "检测因权限异常无法读取、无法完成审查的文件",
+    },
+    AuditRuleInfo {
+        rule_id: "SEC-011",
+        severity: AuditSeverity::Warn,
+        title: "未知二进制",
+        description: "检测不在白名单格式（图片 / 字体 / 媒体等）内的二进制内容",
+    },
+];
+
+/// 得分模型：满分 base，按发现级别扣分，最低 0 分。
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct AuditScoreModel {
+    pub base: i64,
+    pub block_penalty: i64,
+    pub warn_penalty: i64,
+    pub info_penalty: i64,
+}
+
+pub const AUDIT_SCORE_MODEL: AuditScoreModel = AuditScoreModel {
+    base: 100,
+    block_penalty: 30,
+    warn_penalty: 10,
+    info_penalty: 5,
+};
+
+pub fn audit_score(findings: &[AuditFinding]) -> i64 {
+    let blocks = findings
+        .iter()
+        .filter(|f| f.severity == AuditSeverity::Block)
+        .count() as i64;
+    let warns = findings
+        .iter()
+        .filter(|f| f.severity == AuditSeverity::Warn)
+        .count() as i64;
+    let infos = findings
+        .iter()
+        .filter(|f| f.severity == AuditSeverity::Info)
+        .count() as i64;
+    (AUDIT_SCORE_MODEL.base
+        - blocks * AUDIT_SCORE_MODEL.block_penalty
+        - warns * AUDIT_SCORE_MODEL.warn_penalty
+        - infos * AUDIT_SCORE_MODEL.info_penalty)
+        .max(0)
 }
 
 impl AuditVerdict {
@@ -443,11 +559,13 @@ pub fn audit_dir(dir: &Path) -> AuditReport {
     } else {
         AuditVerdict::Pass
     };
+    let score = audit_score(&findings);
 
     AuditReport {
         content_hash: scanner::directory_hash(dir),
         verdict,
         findings,
+        score,
         created_at: now_iso(),
     }
 }
@@ -457,7 +575,7 @@ pub fn audit_dir(dir: &Path) -> AuditReport {
 fn load_cached(conn: &Connection, skill_id: &str, content_hash: &str) -> Option<AuditReport> {
     let row = conn
         .query_row(
-            "SELECT verdict, findings, created_at FROM skill_audits
+            "SELECT verdict, findings, score, created_at FROM skill_audits
              WHERE skill_id = ?1 AND content_hash = ?2
              ORDER BY id DESC LIMIT 1",
             params![skill_id, content_hash],
@@ -465,7 +583,8 @@ fn load_cached(conn: &Connection, skill_id: &str, content_hash: &str) -> Option<
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
                 ))
             },
         )
@@ -477,11 +596,14 @@ fn load_cached(conn: &Connection, skill_id: &str, content_hash: &str) -> Option<
         _ => AuditVerdict::Pass,
     };
     let findings: Vec<AuditFinding> = serde_json::from_str(&row.1).unwrap_or_default();
+    // score 以 findings 现算，避免旧缓存行（无 score 列时默认 100）显示错误分数
+    let score = audit_score(&findings);
     Some(AuditReport {
         content_hash: content_hash.to_string(),
         verdict,
         findings,
-        created_at: row.2,
+        score,
+        created_at: row.3,
     })
 }
 
@@ -492,13 +614,14 @@ fn persist(conn: &Connection, skill_id: &str, report: &AuditReport) -> Result<()
     )
     .map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO skill_audits (skill_id, content_hash, verdict, findings, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO skill_audits (skill_id, content_hash, verdict, findings, score, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             skill_id,
             report.content_hash,
             report.verdict.as_str(),
             serde_json::to_string(&report.findings).unwrap_or_else(|_| "[]".into()),
+            report.score,
             report.created_at
         ],
     )
@@ -571,10 +694,119 @@ pub fn audit_skill(db: State<DbState>, skill_id: String) -> Result<AuditReport, 
     Ok(report)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_skill_audit(db: State<DbState>, skill_id: String) -> Result<AuditReport, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     audit_skill_cached(&conn, &skill_id, false)
+}
+
+/// 审计规则目录 + 得分模型：审计页向用户展示"审计了什么、怎么打分"。
+#[derive(serde::Serialize)]
+pub struct AuditRulesResponse {
+    pub rules: Vec<AuditRuleInfo>,
+    pub score_model: AuditScoreModel,
+}
+
+#[tauri::command]
+pub fn get_audit_rules() -> AuditRulesResponse {
+    AuditRulesResponse {
+        rules: AUDIT_RULES.to_vec(),
+        score_model: AUDIT_SCORE_MODEL,
+    }
+}
+
+/// 单个 skill 的审计摘要（批量审计返回行）。
+#[derive(Clone, Debug, Serialize)]
+pub struct SkillAuditSummary {
+    pub skill_id: String,
+    pub name: String,
+    pub source_lib: String,
+    pub verdict: String,
+    pub score: i64,
+    pub block_count: i64,
+    pub warn_count: i64,
+    pub info_count: i64,
+    pub finding_count: i64,
+    pub created_at: String,
+}
+
+/// 批量审计：ids 为 None 时审计全部 skill。逐条走缓存（hash 未变不重算），
+/// 单个 skill 失败（目录被外部删除等）跳过并记录到 error 字段。
+pub fn audit_skills_batch_impl(
+    conn: &Connection,
+    skill_ids: Option<&[String]>,
+) -> Result<Vec<SkillAuditSummary>, String> {
+    let ids: Vec<String> = match skill_ids {
+        Some(ids) => ids.to_vec(),
+        None => {
+            let mut stmt = conn
+                .prepare("SELECT id FROM skills ORDER BY name COLLATE NOCASE")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .flatten()
+                .collect();
+            rows
+        }
+    };
+
+    let mut summaries = Vec::new();
+    for skill_id in ids {
+        let (name, source_lib) = match conn.query_row(
+            "SELECT name, source_lib FROM skills WHERE id = ?1",
+            params![skill_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        ) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let report = match audit_skill_cached(conn, &skill_id, false) {
+            Ok(report) => report,
+            Err(error) => {
+                log_activity(conn, "audit_skill_error", &format!("{}: {}", name, error));
+                continue;
+            }
+        };
+        let count_of = |findings: &[AuditFinding], severity: AuditSeverity| {
+            findings
+                .iter()
+                .filter(|f| f.severity == severity)
+                .count() as i64
+        };
+        let block_count = count_of(&report.findings, AuditSeverity::Block);
+        let warn_count = count_of(&report.findings, AuditSeverity::Warn);
+        let info_count = count_of(&report.findings, AuditSeverity::Info);
+        let finding_count = report.findings.len() as i64;
+        summaries.push(SkillAuditSummary {
+            verdict: report.verdict.as_str().to_string(),
+            score: report.score,
+            block_count,
+            warn_count,
+            info_count,
+            finding_count,
+            created_at: report.created_at,
+            skill_id,
+            name,
+            source_lib,
+        });
+    }
+    Ok(summaries)
+}
+
+#[tauri::command(async)]
+pub fn audit_skills_batch(
+    db: State<DbState>,
+    skill_ids: Option<Vec<String>>,
+) -> Result<Vec<SkillAuditSummary>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let summaries = audit_skills_batch_impl(&conn, skill_ids.as_deref())?;
+    log_activity(
+        &conn,
+        "audit_skills_batch",
+        &format!("审查 {} 个 skill", summaries.len()),
+    );
+    Ok(summaries)
 }
 
 #[cfg(test)]
@@ -729,6 +961,7 @@ mod tests {
                 content_hash TEXT NOT NULL,
                 verdict TEXT NOT NULL,
                 findings TEXT NOT NULL DEFAULT '[]',
+                score INTEGER NOT NULL DEFAULT 100,
                 created_at TEXT NOT NULL
              )",
         )
@@ -746,5 +979,110 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM skill_audits", [], |row| row.get(0))
             .unwrap();
         assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn rule_catalog_covers_every_generated_rule() {
+        let catalog_ids: Vec<&str> = AUDIT_RULES.iter().map(|r| r.rule_id).collect();
+        // 目录无重复
+        let mut unique = catalog_ids.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), catalog_ids.len());
+
+        // 每条明文规则都登记在目录里
+        for rule in TEXT_RULES {
+            assert!(
+                catalog_ids.contains(&rule.id),
+                "{} missing from AUDIT_RULES",
+                rule.id
+            );
+        }
+        // 特殊代码路径生成的规则也要登记
+        for special in ["SEC-003", "SEC-007", "SEC-008", "SEC-009", "SEC-010", "SEC-011"] {
+            assert!(catalog_ids.contains(&special));
+        }
+    }
+
+    #[test]
+    fn score_follows_penalty_model_with_floor() {
+        let finding = |severity: AuditSeverity| AuditFinding {
+            rule_id: "SEC-001".into(),
+            severity,
+            location: "SKILL.md:1".into(),
+            message: String::new(),
+        };
+
+        assert_eq!(audit_score(&[]), 100);
+        assert_eq!(audit_score(&[finding(AuditSeverity::Block)]), 70);
+        assert_eq!(
+            audit_score(&[finding(AuditSeverity::Block), finding(AuditSeverity::Warn)]),
+            60
+        );
+        assert_eq!(
+            audit_score(&[finding(AuditSeverity::Warn), finding(AuditSeverity::Info)]),
+            85
+        );
+        // 4 个 Block = -120，触底 0 分
+        assert_eq!(
+            audit_score(&[
+                finding(AuditSeverity::Block),
+                finding(AuditSeverity::Block),
+                finding(AuditSeverity::Block),
+                finding(AuditSeverity::Block),
+            ]),
+            0
+        );
+    }
+
+    #[test]
+    fn batch_audit_summarizes_all_skills() {
+        let clean = temp_skill();
+        let evil = temp_skill();
+        fs::write(clean.0.join("SKILL.md"), "说明\n").unwrap();
+        fs::write(evil.0.join("SKILL.md"), "读取 ~/.ssh/id_rsa\n").unwrap();
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, source_lib TEXT NOT NULL, path TEXT NOT NULL);
+             CREATE TABLE skill_audits (
+                id INTEGER PRIMARY KEY,
+                skill_id TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                findings TEXT NOT NULL DEFAULT '[]',
+                score INTEGER NOT NULL DEFAULT 100,
+                created_at TEXT NOT NULL
+             );
+             CREATE TABLE activity_log (
+                id INTEGER PRIMARY KEY, action TEXT NOT NULL, detail TEXT, created_at TEXT NOT NULL
+             )",
+        )
+        .unwrap();
+        for (id, name, dir) in [
+            ("lib:clean", "clean", clean.0.clone()),
+            ("lib:evil", "evil", evil.0.clone()),
+        ] {
+            conn.execute(
+                "INSERT INTO skills (id, name, source_lib, path) VALUES (?1, ?2, '主库', ?3)",
+                params![id, name, dir.to_string_lossy().to_string()],
+            )
+            .unwrap();
+        }
+
+        let summaries = audit_skills_batch_impl(&conn, None).unwrap();
+        assert_eq!(summaries.len(), 2);
+        let evil = summaries.iter().find(|s| s.skill_id == "lib:evil").unwrap();
+        assert_eq!(evil.verdict, "block");
+        assert_eq!(evil.score, 70);
+        assert_eq!(evil.block_count, 1);
+        let clean = summaries.iter().find(|s| s.skill_id == "lib:clean").unwrap();
+        assert_eq!(clean.verdict, "pass");
+        assert_eq!(clean.score, 100);
+
+        // 指定 id 只审计对应 skill
+        let single = audit_skills_batch_impl(&conn, Some(&["lib:clean".to_string()])).unwrap();
+        assert_eq!(single.len(), 1);
+        assert_eq!(single[0].skill_id, "lib:clean");
     }
 }

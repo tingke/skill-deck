@@ -509,6 +509,7 @@ pub fn get_all_skills(conn: &Connection) -> Vec<SkillRow> {
             "SELECT s.id, s.name, s.source_lib, s.path, s.description, s.content_hash, s.tags, s.enabled,
                     s.author, s.license, s.version, s.permissions,
                     (SELECT a.verdict FROM skill_audits a WHERE a.skill_id = s.id ORDER BY a.id DESC LIMIT 1),
+                    (SELECT a.score FROM skill_audits a WHERE a.skill_id = s.id ORDER BY a.id DESC LIMIT 1),
                     (SELECT o.origin_type FROM skill_origins o WHERE o.skill_id = s.id),
                     (SELECT o.origin_ref FROM skill_origins o WHERE o.skill_id = s.id),
                      GROUP_CONCAT(c.runtime) as linked_runtimes
@@ -528,12 +529,13 @@ pub fn get_all_skills(conn: &Connection) -> Vec<SkillRow> {
         let version: String = row.get(10).unwrap_or_default();
         let perms_str: String = row.get(11).unwrap_or_else(|_| "[]".to_string());
         let audit_verdict: Option<String> = row.get(12).unwrap_or(None);
-        let origin_type: Option<String> = row.get(13).unwrap_or(None);
-        let origin_ref: Option<String> = row.get(14).unwrap_or(None);
+        let audit_score: Option<i64> = row.get(13).unwrap_or(None);
+        let origin_type: Option<String> = row.get(14).unwrap_or(None);
+        let origin_ref: Option<String> = row.get(15).unwrap_or(None);
         let permissions: Vec<String> = serde_json::from_str(&perms_str).unwrap_or_default();
         let tags: Vec<String> =
             serde_json::from_str(&tags_str).unwrap_or_default();
-        let linked_str: String = row.get::<_, Option<String>>(15).unwrap_or(None).unwrap_or_default();
+        let linked_str: String = row.get::<_, Option<String>>(16).unwrap_or(None).unwrap_or_default();
         let links: Vec<String> = if linked_str.is_empty() {
             vec![]
         } else {
@@ -554,6 +556,7 @@ pub fn get_all_skills(conn: &Connection) -> Vec<SkillRow> {
             version,
             permissions,
             audit_verdict,
+            audit_score,
             origin_type,
             origin_ref,
         })

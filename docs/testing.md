@@ -6,12 +6,12 @@
 
 | 命令 | 覆盖内容 | 当前基线 |
 | --- | --- | --- |
-| `npm test` | 纯 TypeScript 逻辑与 Zustand 确认流 | 17 个 Node test |
+| `npm test` | 纯 TypeScript 逻辑与 Zustand 确认流 | 19 个 Node test |
 | `npm run test:layout` | App shell、Skills 布局、Tauri 窗口、drag region、设计 token 契约 | 通过 |
 | `npm run typecheck` | TypeScript strict 检查 | 通过 |
 | `npm run build` | typecheck + Vite production build | CI 前端必跑 |
 | `cd src-tauri && cargo check --locked` | Rust 编译与依赖检查 | CI 必跑 |
-| `cd src-tauri && cargo test --locked` | Rust 域逻辑和迁移 | 当前 68 个测试 |
+| `cd src-tauri && cargo test --locked` | Rust 域逻辑和迁移 | 当前 72 个测试 |
 
 ## 前端单元测试
 
@@ -54,6 +54,7 @@ import test from "node:test";
   - schema 迁移和旧数据兼容
   - frontmatter/SKILL 扫描边界
   - skill 安全审查规则（凭据读取、提示注入、可执行二进制、symlink 逃逸）与安装/更新门禁
+  - 审计规则目录完整性、得分模型与批量审计摘要
   - 安装来源 fetch、暂存落盘、zip 路径穿越拒绝、冲突不覆盖与更新回滚
   - symlink、真实目录、真实文件和共享链接冲突
   - 收纳真实入口时的失败回退

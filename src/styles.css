@@ -974,6 +974,31 @@ code, pre, kbd { font-family: var(--font-mono); }
   animation: modal-in var(--duration-slow) var(--ease-fast);
 }
 
+/* ---- Audit rules dialog（规则清单，列表长，内部滚动） ---- */
+.audit-rules-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: min(680px, 100%);
+  max-height: min(680px, 90vh);
+  padding: var(--space-5);
+  border: 1px solid rgb(var(--c-border));
+  border-radius: var(--radius-xl);
+  background: rgb(var(--c-surface));
+  box-shadow: var(--shadow-lg);
+  animation: modal-in var(--duration-slow) var(--ease-fast);
+}
+
+.audit-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+
 /* ---- Right-side detail drawer — solid, with hairline divider ---- */
 .detail-drawer-overlay {
   position: fixed;

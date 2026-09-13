@@ -13,6 +13,7 @@ export interface Skill {
   version: string;
   permissions: string[];
   audit_verdict?: string | null;
+  audit_score?: number | null;
   origin_type?: string | null;
   origin_ref?: string | null;
 }
@@ -31,6 +32,39 @@ export interface AuditReport {
   content_hash: string;
   verdict: AuditVerdict;
   findings: AuditFinding[];
+  score: number;
+  created_at: string;
+}
+
+export interface AuditRuleInfo {
+  rule_id: string;
+  severity: AuditSeverity;
+  title: string;
+  description: string;
+}
+
+export interface AuditScoreModel {
+  base: number;
+  block_penalty: number;
+  warn_penalty: number;
+  info_penalty: number;
+}
+
+export interface AuditRulesResponse {
+  rules: AuditRuleInfo[];
+  score_model: AuditScoreModel;
+}
+
+export interface SkillAuditSummary {
+  skill_id: string;
+  name: string;
+  source_lib: string;
+  verdict: AuditVerdict;
+  score: number;
+  block_count: number;
+  warn_count: number;
+  info_count: number;
+  finding_count: number;
   created_at: string;
 }
 
@@ -137,7 +171,7 @@ export const AGENT_COLORS: Record<string, { bg: string; dot: string; text: strin
   workbuddy: { bg: "bg-violet-600", dot: "bg-violet-500", text: "text-violet-600" },
 };
 
-export type ViewKey = "dashboard" | "skills" | "presets" | "prompts" | "rules" | "mcp" | "plugins" | "hooks" | "agents" | "projects" | "settings" | "design";
+export type ViewKey = "dashboard" | "skills" | "audit" | "presets" | "prompts" | "rules" | "mcp" | "plugins" | "hooks" | "agents" | "projects" | "settings" | "design";
 
 export interface ProjectRow {
   id: string;

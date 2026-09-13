@@ -6,7 +6,9 @@ import {
   needsUserConfirm,
   sortFindingsBySeverity,
   INSTALL_STATUS_META,
+  scoreGradeMeta,
 } from "../src/lib/skillAudit";
+import { formatAuditTime } from "../src/lib/auditTime";
 
 test("audit verdict meta maps known verdicts and rejects unknown values", () => {
   assert.equal(auditVerdictMeta("pass")?.label, "通过");
@@ -46,4 +48,24 @@ test("every install status has display metadata", () => {
     assert.ok(meta.label.length > 0, `${status} should have a label`);
     assert.equal(typeof meta.blocked, "boolean");
   }
+});
+
+test("score grade maps by threshold and rejects null", () => {
+  assert.equal(scoreGradeMeta(null), null);
+  assert.equal(scoreGradeMeta(undefined), null);
+  assert.equal(scoreGradeMeta(100)?.label, "优");
+  assert.equal(scoreGradeMeta(90)?.label, "优");
+  assert.equal(scoreGradeMeta(89)?.label, "良");
+  assert.equal(scoreGradeMeta(75)?.label, "良");
+  assert.equal(scoreGradeMeta(60)?.label, "中");
+  assert.equal(scoreGradeMeta(59)?.label, "差");
+  assert.equal(scoreGradeMeta(0)?.label, "差");
+});
+
+test("formatAuditTime renders local MM-DD HH:mm and tolerates invalid input", () => {
+  assert.equal(formatAuditTime(null), "—");
+  assert.equal(formatAuditTime(undefined), "—");
+  assert.equal(formatAuditTime("not-a-date"), "not-a-date");
+  const local = new Date(2026, 8, 13, 9, 5); // 本地时区 2026-09-13 09:05
+  assert.equal(formatAuditTime(local.toISOString()), "09-13 09:05");
 });
