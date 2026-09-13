@@ -3,6 +3,7 @@ use crate::db::{
 };
 use crate::agent_config::McpConfigFormat;
 use crate::packages::{list_packages, sanitize, save_package};
+use serde::Serialize;
 use rusqlite::{params, Connection};
 use std::collections::HashSet;
 use std::fs;
@@ -22,6 +23,26 @@ pub struct ProjectMcpTarget {
     pub agent_id: String,
     pub path: PathBuf,
     pub format: McpConfigFormat,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectPackageDrift {
+    pub project_id: String,
+    pub project_name: String,
+    pub project_path: String,
+    pub project_exists: bool,
+    pub package_id: Option<String>,
+    pub package_name: String,
+    pub status: String,
+    pub skills_missing: i64,
+    pub skills_extra: i64,
+    pub mcps_added: i64,
+    pub mcps_removed: i64,
+    pub mcps_changed: i64,
+    pub configs_added: i64,
+    pub configs_removed: i64,
+    pub configs_changed: i64,
+    pub has_changes: bool,
 }
 
 struct CommonAgentTemplate {
@@ -424,6 +445,193 @@ fn project_skill_inputs(conn: &Connection, project_id: &str) -> Vec<PackageSkill
     output
 }
 
+fn project_package_name(project_id: &str) -> String {
+    let name = sanitize(&format!("project-{}", project_id));
+    if name.is_empty() {
+        format!("project-{}", Uuid::new_v4())
+    } else {
+        name
+    }
+}
+
+fn project_package_input(
+    conn: &Connection,
+    project_id: &str,
+    project_name: &str,
+    project_path: &str,
+) -> Result<PackageInput, String> {
+    let root = PathBuf::from(project_path);
+    if !root.is_dir() {
+        return Err(format!("不是有效项目目录: {}", project_path));
+    }
+    let agents = project_agents(conn, &root);
+    Ok(PackageInput {
+        name: project_package_name(project_id),
+        display_name: Some(project_name.to_string()),
+        version: Some("0.1.0".to_string()),
+        description: Some(format!("从项目「{}」生成", project_name)),
+        skills: project_skill_inputs(conn, project_id),
+        mcps: project_mcp_inputs(&root, &agents),
+        configs: project_rule_inputs(conn, &root, &agents),
+    })
+}
+
+fn canonical_config_json(value: &str) -> serde_json::Value {
+    serde_json::from_str(value).unwrap_or(serde_json::Value::Null)
+}
+
+pub fn project_package_drift(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<ProjectPackageDrift, String> {
+    let (project_name, project_path): (String, String) = conn
+        .query_row(
+            "SELECT name, path FROM projects WHERE id = ?1",
+            params![project_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| format!("project not found: {}", project_id))?;
+    let package_name = project_package_name(project_id);
+    let package_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM packages WHERE name = ?1",
+            params![package_name],
+            |row| row.get(0),
+        )
+        .ok();
+    let mut drift = ProjectPackageDrift {
+        project_id: project_id.to_string(),
+        project_name,
+        project_path,
+        project_exists: false,
+        package_id,
+        package_name,
+        status: "invalid".to_string(),
+        skills_missing: 0,
+        skills_extra: 0,
+        mcps_added: 0,
+        mcps_removed: 0,
+        mcps_changed: 0,
+        configs_added: 0,
+        configs_removed: 0,
+        configs_changed: 0,
+        has_changes: false,
+    };
+
+    let root = PathBuf::from(&drift.project_path);
+    if !root.is_dir() {
+        return Ok(drift);
+    }
+    drift.project_exists = true;
+
+    let Some(package_id) = drift.package_id.clone() else {
+        drift.status = "missing".to_string();
+        drift.has_changes = true;
+        return Ok(drift);
+    };
+    let Some(existing) = crate::packages::get_package_detail(conn, &package_id) else {
+        drift.package_id = None;
+        drift.status = "missing".to_string();
+        drift.has_changes = true;
+        return Ok(drift);
+    };
+
+    let desired = project_package_input(
+        conn,
+        project_id,
+        &drift.project_name,
+        &drift.project_path,
+    )?;
+
+    let desired_skills: HashSet<&str> = desired.skills.iter().map(|item| item.name.as_str()).collect();
+    let existing_skills: HashSet<&str> = existing.skills.iter().map(|item| item.name.as_str()).collect();
+    drift.skills_missing = desired_skills.difference(&existing_skills).count() as i64;
+    drift.skills_extra = existing_skills.difference(&desired_skills).count() as i64;
+
+    let desired_mcps: std::collections::HashMap<&str, serde_json::Value> = desired
+        .mcps
+        .iter()
+        .map(|item| (item.name.as_str(), canonical_config_json(&item.config_json)))
+        .collect();
+    let existing_mcps: std::collections::HashMap<&str, serde_json::Value> = existing
+        .mcps
+        .iter()
+        .map(|item| (item.name.as_str(), canonical_config_json(&item.config_json)))
+        .collect();
+    for (name, config) in &desired_mcps {
+        match existing_mcps.get(name) {
+            None => drift.mcps_added += 1,
+            Some(current) if current != config => drift.mcps_changed += 1,
+            _ => {}
+        }
+    }
+    drift.mcps_removed = existing_mcps
+        .keys()
+        .filter(|name| !desired_mcps.contains_key(*name))
+        .count() as i64;
+
+    let desired_configs: std::collections::HashMap<(&str, &str), &str> = desired
+        .configs
+        .iter()
+        .map(|item| ((item.agent.as_str(), item.file_name.as_str()), item.content.as_str()))
+        .collect();
+    let existing_configs: std::collections::HashMap<(&str, &str), &str> = existing
+        .configs
+        .iter()
+        .map(|item| ((item.agent.as_str(), item.file_name.as_str()), item.content.as_str()))
+        .collect();
+    for (key, content) in &desired_configs {
+        match existing_configs.get(key) {
+            None => drift.configs_added += 1,
+            Some(current) if current != content => drift.configs_changed += 1,
+            _ => {}
+        }
+    }
+    drift.configs_removed = existing_configs
+        .keys()
+        .filter(|key| !desired_configs.contains_key(*key))
+        .count() as i64;
+
+    drift.has_changes = drift.skills_missing > 0
+        || drift.skills_extra > 0
+        || drift.mcps_added > 0
+        || drift.mcps_removed > 0
+        || drift.mcps_changed > 0
+        || drift.configs_added > 0
+        || drift.configs_removed > 0
+        || drift.configs_changed > 0;
+    drift.status = if drift.has_changes {
+        "drifted".to_string()
+    } else {
+        "up_to_date".to_string()
+    };
+    Ok(drift)
+}
+
+pub fn list_project_drifts(conn: &Connection) -> Vec<ProjectPackageDrift> {
+    let project_ids: Vec<String> = {
+        let Ok(mut stmt) = conn
+            .prepare("SELECT id FROM projects ORDER BY name COLLATE NOCASE")
+        else {
+            return Vec::new();
+        };
+        let Ok(rows) = stmt.query_map([], |row| row.get(0)) else {
+            return Vec::new();
+        };
+        rows.flatten().collect()
+    };
+    project_ids
+        .into_iter()
+        .filter_map(|project_id| project_package_drift(conn, &project_id).ok())
+        .collect()
+}
+
+#[tauri::command]
+pub fn get_project_drifts(db: State<DbState>) -> Result<Vec<ProjectPackageDrift>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    Ok(list_project_drifts(&conn))
+}
+
 pub fn create_package_from_project(
     conn: &Connection,
     project_id: &str,
@@ -435,29 +643,8 @@ pub fn create_package_from_project(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|_| format!("project not found: {}", project_id))?;
-    let root = PathBuf::from(&project_path);
-    if !root.is_dir() {
-        return Err(format!("不是有效项目目录: {}", project_path));
-    }
-
-    let agents = project_agents(conn, &root);
-    let package_name = {
-        let name = sanitize(&format!("project-{}", project_id));
-        if name.is_empty() {
-            format!("project-{}", Uuid::new_v4())
-        } else {
-            name
-        }
-    };
-    let input = PackageInput {
-        name: package_name.clone(),
-        display_name: Some(project_name.clone()),
-        version: Some("0.1.0".to_string()),
-        description: Some(format!("从项目「{}」生成", project_name)),
-        skills: project_skill_inputs(conn, project_id),
-        mcps: project_mcp_inputs(&root, &agents),
-        configs: project_rule_inputs(conn, &root, &agents),
-    };
+    let input = project_package_input(conn, project_id, &project_name, &project_path)?;
+    let package_name = input.name.clone();
     let existing_id: Option<String> = conn
         .query_row(
             "SELECT id FROM packages WHERE name = ?1",
@@ -674,5 +861,58 @@ mod tests {
             .unwrap();
         assert_eq!(agent, "cursor");
         assert_eq!(file_name, ".cursorrules");
+    }
+
+    #[test]
+    fn project_drift_reports_missing_and_changed_preset_content() {
+        let root = TempDir::new("project-drift");
+        let conn = test_db();
+        conn.execute(
+            "INSERT INTO agents (id, label, skills_dir, config_dir, mcp_config_file, color,
+                auto_scan, scan_agents_dir, enabled, sort_order, created_at, updated_at)
+             VALUES ('claude', 'Claude', '.claude/skills', '.claude', '.claude.json', 'orange',
+                0, 0, 1, 0, 'now', 'now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO projects (id, name, path, color, sort_order, created_at, updated_at)
+             VALUES ('demo', 'Demo', ?1, 'slate', 0, 'now', 'now')",
+            params![root.path().to_string_lossy().to_string()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO skills (id, name, source_lib, path, enabled, created_at, updated_at)
+             VALUES ('project:demo:alpha', 'alpha', 'Demo', ?1, 1, 'now', 'now')",
+            params![root.path().join("alpha").to_string_lossy().to_string()],
+        )
+        .unwrap();
+        fs::write(root.path().join("CLAUDE.md"), "# Rules v1").unwrap();
+
+        let missing = project_package_drift(&conn, "demo").unwrap();
+        assert_eq!(missing.status, "missing");
+        assert!(missing.has_changes);
+
+        create_package_from_project(&conn, "demo").unwrap();
+        let current = project_package_drift(&conn, "demo").unwrap();
+        assert_eq!(current.status, "up_to_date");
+        assert!(!current.has_changes);
+
+        fs::write(root.path().join("CLAUDE.md"), "# Rules v2").unwrap();
+        conn.execute(
+            "INSERT INTO skills (id, name, source_lib, path, enabled, created_at, updated_at)
+             VALUES ('project:demo:beta', 'beta', 'Demo', ?1, 1, 'now', 'now')",
+            params![root.path().join("beta").to_string_lossy().to_string()],
+        )
+        .unwrap();
+        let drifted = project_package_drift(&conn, "demo").unwrap();
+        assert_eq!(drifted.status, "drifted");
+        assert_eq!(drifted.skills_missing, 1);
+        assert_eq!(drifted.configs_changed, 1);
+        assert!(drifted.has_changes);
+
+        let all = list_project_drifts(&conn);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].status, "drifted");
     }
 }

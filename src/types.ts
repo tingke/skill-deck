@@ -150,6 +150,25 @@ export interface ProjectRow {
   updated_at: string;
 }
 
+export interface ProjectPackageDrift {
+  project_id: string;
+  project_name: string;
+  project_path: string;
+  project_exists: boolean;
+  package_id: string | null;
+  package_name: string;
+  status: "missing" | "up_to_date" | "drifted" | "invalid" | string;
+  skills_missing: number;
+  skills_extra: number;
+  mcps_added: number;
+  mcps_removed: number;
+  mcps_changed: number;
+  configs_added: number;
+  configs_removed: number;
+  configs_changed: number;
+  has_changes: boolean;
+}
+
 export interface Prompt {
   id: number;
   title: string;

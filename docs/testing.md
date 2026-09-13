@@ -11,7 +11,7 @@
 | `npm run typecheck` | TypeScript strict 检查 | 通过 |
 | `npm run build` | typecheck + Vite production build | CI 前端必跑 |
 | `cd src-tauri && cargo check --locked` | Rust 编译与依赖检查 | CI 必跑 |
-| `cd src-tauri && cargo test --locked` | Rust 域逻辑和迁移 | 当前 67 个测试 |
+| `cd src-tauri && cargo test --locked` | Rust 域逻辑和迁移 | 当前 68 个测试 |
 
 ## 前端单元测试
 

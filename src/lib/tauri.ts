@@ -201,6 +201,9 @@ export const applyPkgToProject = (
 export const createPkgFromProject = (projectId: string) =>
   invoke<PackageRow>("create_pkg_from_project", { projectId });
 
+export const getProjectDrifts = () =>
+  invoke<import("../types").ProjectPackageDrift[]>("get_project_drifts");
+
 
 // ===================== Extensions (MCP / Hook / Plugin) =====================
 import type { ExtensionRow, McpServerInput, HookInput, PluginToggleInput } from "../types";

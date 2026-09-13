@@ -1,14 +1,20 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSkillsStore } from "../stores/skills";
 import { useWorkspaceStore } from "../stores/workspace";
 import { usePackagesStore } from "../stores/packages";
 import { useActivityStore } from "../stores/activity";
-import { saveProject, deleteProject, pickProjectFolder, createPkgFromProject } from "../lib/tauri";
+import {
+  saveProject,
+  deleteProject,
+  pickProjectFolder,
+  createPkgFromProject,
+  getProjectDrifts,
+} from "../lib/tauri";
 import { revealInFinder } from "../lib/tauri";
 import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
-import { FolderKanban, Plus, Trash2, Edit3, X, FolderOpen, BookOpen, PackagePlus } from "lucide-react";
-import type { ProjectRow } from "../types";
+import { FolderKanban, Plus, Trash2, Edit3, X, FolderOpen, BookOpen, PackagePlus, Radio, RefreshCw } from "lucide-react";
+import type { ProjectPackageDrift, ProjectRow } from "../types";
 import type { TranslationKey } from "../i18n";
 import { useDeleteConfirmation } from "../lib/deleteConfirmation";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
@@ -41,6 +47,10 @@ function colorOf(c: string) {
   return COLOR_MAP[c] || COLOR_MAP.slate;
 }
 
+function normalizeProjectPath(path: string) {
+  return path.replace(/\/+$/, "");
+}
+
 export default function ProjectsView() {
   const t = useT();
   const { projects, loadProjects } = useWorkspaceStore();
@@ -48,9 +58,41 @@ export default function ProjectsView() {
   const scanNow = useSkillsStore((s) => s.scanNow);
   const loadPackages = usePackagesStore((s) => s.loadPackages);
   const loadActivity = useActivityStore((s) => s.loadActivity);
+  const agentActivity = useActivityStore((s) => s.agentActivity);
+  const loadAgentActivity = useActivityStore((s) => s.loadAgentActivity);
   const [editing, setEditing] = useState<ProjectRow | null>(null);
   const [presetProjectId, setPresetProjectId] = useState<string | null>(null);
+  const [drifts, setDrifts] = useState<ProjectPackageDrift[]>([]);
   const deleteConfirmation = useDeleteConfirmation();
+
+  const activeProjectId = useMemo(() => {
+    const normalize = normalizeProjectPath;
+    const activeTask = [...agentActivity.tasks]
+      .filter((task) => ["working", "waiting"].includes(task.status))
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    const activeEvent = [...agentActivity.events]
+      .filter((event) => ["working", "waiting"].includes(event.state))
+      .sort((a, b) => b.timestamp - a.timestamp)[0];
+    const activePath = activeTask?.projectPath || activeEvent?.project;
+    if (!activePath) return null;
+    return projects.find((project) => normalize(project.path) === normalize(activePath))?.id ?? null;
+  }, [agentActivity, projects]);
+
+  const loadDrifts = async () => {
+    try {
+      setDrifts(await getProjectDrifts());
+    } catch {
+      // Drift is a non-critical enhancement; leave the previous snapshot visible.
+    }
+  };
+
+  useEffect(() => {
+    void loadAgentActivity();
+  }, [loadAgentActivity]);
+
+  useEffect(() => {
+    void loadDrifts();
+  }, [projects]);
 
   const handleAdd = async () => {
     const folder = await pickProjectFolder();
@@ -70,6 +112,7 @@ export default function ProjectsView() {
       await saveProject(project);
       await loadProjects();
       await scanNow();
+      await loadDrifts();
       toast().show(t("projects.added", { name }));
     } catch (e) {
       toast().show(t("common.addFailed", { msg: String(e) }), "error");
@@ -80,6 +123,7 @@ export default function ProjectsView() {
     await deleteProject(id);
     await loadProjects();
     await scanNow();
+    await loadDrifts();
     toast().show(t("projects.deleted"), "info");
   };
 
@@ -87,9 +131,11 @@ export default function ProjectsView() {
     if (presetProjectId) return;
     setPresetProjectId(project.id);
     try {
+      await scanNow();
       const preset = await createPkgFromProject(project.id);
       await loadPackages();
       await loadActivity();
+      await loadDrifts();
       toast().show(t("projects.presetUpdated", { name: preset.display_name || preset.name }));
     } catch (e) {
       toast().show(t("projects.presetFailed", { msg: String(e) }), "error");
@@ -126,6 +172,8 @@ export default function ProjectsView() {
             {projects.map((p) => {
               const c = colorOf(p.color);
               const projectSkills = skills.filter((s) => s.id.startsWith(`project:${p.id}:`));
+              const drift = drifts.find((item) => item.project_id === p.id);
+              const driftSummary = drift ? drift.skills_missing + drift.skills_extra + drift.mcps_added + drift.mcps_removed + drift.mcps_changed + drift.configs_added + drift.configs_removed + drift.configs_changed : 0;
               return (
                 <div
                   key={p.id}
@@ -136,16 +184,21 @@ export default function ProjectsView() {
                       <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${c.dot}`} />
                       <div className="min-w-0">
                         <h3 className="text-sm font-semibold text-heading truncate">{p.name}</h3>
+                        {activeProjectId === p.id && (
+                          <span className="mt-0.5 inline-flex items-center gap-1 text-2xs text-emerald-600 dark:text-emerald-400">
+                            <Radio size={10} /> {t("projects.active")}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-0.5 shrink-0">
                       <button
                         onClick={() => handleAddToPreset(p)}
                         disabled={presetProjectId === p.id}
-                        title={t("projects.addToPreset")}
+                        title={t("projects.syncPreset")}
                         className="btn-icon"
                       >
-                        <PackagePlus size={14} />
+                        {drift?.has_changes ? <RefreshCw size={14} /> : <PackagePlus size={14} />}
                       </button>
                       <button onClick={() => setEditing(p)} title={t("common.edit")} className="btn-icon">
                         <Edit3 size={14} />
@@ -177,6 +230,34 @@ export default function ProjectsView() {
                     <span className="text-faint flex items-center gap-0.5">
                       <BookOpen size={11} /> <span className={`font-semibold ${c.text}`}>{t("projects.skillCount", { count: projectSkills.length })}</span>
                     </span>
+                    {drift && (
+                      <span
+                        className={
+                          "font-medium " +
+                          (drift.status === "up_to_date"
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : drift.status === "invalid"
+                              ? "text-faint"
+                              : "text-amber-600 dark:text-amber-400")
+                        }
+                        title={t("projects.driftSummary", {
+                          skills: drift.skills_missing + drift.skills_extra,
+                          mcps: drift.mcps_added + drift.mcps_removed + drift.mcps_changed,
+                          configs: drift.configs_added + drift.configs_removed + drift.configs_changed,
+                        })}
+                      >
+                        {t(
+                          drift.status === "up_to_date"
+                            ? "projects.driftUpToDate"
+                            : drift.status === "invalid"
+                              ? "projects.driftInvalid"
+                              : drift.status === "missing"
+                                ? "projects.driftMissing"
+                                : "projects.driftChanged",
+                          { count: driftSummary },
+                        )}
+                      </span>
+                    )}
                   </div>
 
                   {projectSkills.length > 0 && (

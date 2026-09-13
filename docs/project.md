@@ -32,6 +32,7 @@
 - **能力资产**：管理 Prompts、Rules、MCP、Hooks、Plugins 和 Agent 注册表。
 - **工具集/预设**：组合 Skills、MCP 与配置文件；应用 Agent 前生成变更计划，冲突和缺失默认阻断；导入导出 `.ai-package.zip`，导入会安装并审查打包 Skill；导出默认脱敏 MCP 凭证。项目应用同样先生成变更计划，支持项目级 `.mcp.json` 和已检测 Agent 的 JSON/TOML MCP 配置；路径穿越、软链和覆盖仍有保护。
 - **项目管理**：登记项目根目录，扫描项目 Skill 与项目配置，生成项目工具集。
+- **项目工作区**：根据本地 Agent 活动识别当前项目；项目预设与项目内容对比后显示漂移状态，并支持一键同步。
 - **Agent 观察**：为 Claude Code / Codex 安装带 `skilldeck-agent-observer` 标记的观察 Hook，读取最近 500 条本地事件并展示任务、步骤和进度。
 - **本地设置**：主题、语言偏好、Agent 路径、开机启动、数据库备份恢复和数据目录打开。
 

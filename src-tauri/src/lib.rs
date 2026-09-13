@@ -159,6 +159,7 @@ pub fn run() {
             packages::pick_save_folder,
             packages::apply_pkg_to_project,
             project_packages::create_pkg_from_project,
+            project_packages::get_project_drifts,
             // projects (项目管理)
             projects::get_projects,
             projects::save_project,
