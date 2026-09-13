@@ -164,6 +164,9 @@ export const applyPkg = (id: string, agentId: string) =>
 export const previewPkg = (id: string, agentId: string) =>
   invoke<PackageApplyPlan>("preview_pkg", { id, runtime: agentId });
 
+export const previewPkgToProject = (id: string, projectPath: string) =>
+  invoke<PackageApplyPlan>("preview_pkg_to_project", { id, projectPath });
+
 export const exportPkg = (id: string, destDir?: string, includeSecrets = false) =>
   invoke<PackageExportResult>("export_pkg", {
     id,

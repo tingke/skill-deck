@@ -1,6 +1,7 @@
 use crate::db::{
     DbState, PackageConfigInput, PackageInput, PackageMcpInput, PackageRow, PackageSkillInput,
 };
+use crate::agent_config::McpConfigFormat;
 use crate::packages::{list_packages, sanitize, save_package};
 use rusqlite::{params, Connection};
 use std::collections::HashSet;
@@ -14,6 +15,13 @@ struct ProjectAgentConfig {
     id: String,
     config_dir: String,
     mcp_config_file: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectMcpTarget {
+    pub agent_id: String,
+    pub path: PathBuf,
+    pub format: McpConfigFormat,
 }
 
 struct CommonAgentTemplate {
@@ -111,6 +119,89 @@ fn project_agents(conn: &Connection, root: &Path) -> Vec<ProjectAgentConfig> {
     }
 
     agents
+}
+
+fn agent_has_project_marker(root: &Path, agent: &ProjectAgentConfig) -> bool {
+    if !agent.config_dir.is_empty() && project_relative(root, &agent.config_dir).exists() {
+        return true;
+    }
+    if !agent.mcp_config_file.is_empty()
+        && project_relative(root, &agent.mcp_config_file).exists()
+    {
+        return true;
+    }
+    COMMON_PROJECT_AGENTS
+        .iter()
+        .filter(|template| template.id == agent.id)
+        .flat_map(|template| template.markers.iter())
+        .any(|marker| root.join(marker).exists())
+}
+
+fn agent_mcp_target(root: &Path, agent: &ProjectAgentConfig) -> Result<ProjectMcpTarget, String> {
+    let nested = project_relative(root, &agent.config_dir)
+        .join(Path::new(&agent.mcp_config_file).file_name().ok_or_else(|| {
+            format!("agent {} 的 MCP 文件名无效", agent.id)
+        })?);
+    let configured = project_relative(root, &agent.mcp_config_file);
+    let path = match agent.id.as_str() {
+        "claude" => root.join(".mcp.json"),
+        _ => {
+            if configured.exists() {
+                configured
+            } else {
+                nested
+            }
+        }
+    };
+    let format = if path.extension().and_then(|value| value.to_str()) == Some("toml") {
+        McpConfigFormat::CodexToml
+    } else {
+        McpConfigFormat::JsonServers
+    };
+    Ok(ProjectMcpTarget {
+        agent_id: agent.id.clone(),
+        path,
+        format,
+    })
+}
+
+/// Only return MCP files for agents actually detected in this project, plus the
+/// portable `.mcp.json` bridge. We intentionally do not create configs for every
+/// globally registered Agent when the project shows no marker for it.
+pub fn project_mcp_targets(
+    conn: &Connection,
+    root: &Path,
+) -> Result<Vec<ProjectMcpTarget>, String> {
+    let canonical_root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    let mut targets = vec![ProjectMcpTarget {
+        agent_id: "project".to_string(),
+        path: canonical_root.join(".mcp.json"),
+        format: McpConfigFormat::JsonServers,
+    }];
+
+    for agent in project_agents(conn, &canonical_root) {
+        if !agent_has_project_marker(&canonical_root, &agent) || agent.mcp_config_file.is_empty() {
+            continue;
+        }
+        let target = agent_mcp_target(&canonical_root, &agent)?;
+        if !targets
+            .iter()
+            .any(|existing| existing.path == target.path)
+        {
+            targets.push(target);
+        }
+    }
+
+    targets
+        .into_iter()
+        .map(|mut target| {
+            let relative = target.path.strip_prefix(&canonical_root).map_err(|_| {
+                format!("MCP 配置不在项目目录内: {}", target.path.to_string_lossy())
+            })?;
+            target.path = crate::agent_config::safe_project_target(&canonical_root, relative)?;
+            Ok(target)
+        })
+        .collect()
 }
 
 fn project_relative(root: &Path, value: &str) -> PathBuf {

@@ -152,6 +152,7 @@ pub fn run() {
             packages::delete_pkg,
             packages::apply_pkg,
             packages::preview_pkg,
+            packages::preview_pkg_to_project,
             packages::export_pkg,
             packages::import_pkg,
             packages::pick_folder,

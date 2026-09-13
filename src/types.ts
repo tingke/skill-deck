@@ -260,6 +260,7 @@ export interface PackageApplyPlan {
   package_name: string;
   scope: string;
   agent_id: string;
+  project_path?: string | null;
   actions: PackageApplyAction[];
   blocked_count: number;
 }

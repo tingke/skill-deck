@@ -22,6 +22,7 @@ SkillDeck 是一个本地 AI Skill 管理器，用来集中管理 Skills、Promp
 - **Agent 接线**：为 Skill 创建或断开到各 Agent skills 目录的链接，支持单选和批量操作。
 - **冲突识别**：区分软链接、真实目录和真实文件，避免误删或覆盖已有入口。
 - **场景预设**：按场景维护 Skill 组合，一键切换当前 Agent 的能力挂载。
+- **安全应用与导出**：应用预设前查看变更计划；项目应用支持 `.mcp.json` 与检测到的 Agent MCP 配置；导入会安装并审查打包 Skill；导出默认脱敏 MCP 凭证字段。
 - **安全应用与导出**：应用预设前查看变更计划；导入会安装并审查打包 Skill；导出默认脱敏 MCP 凭证字段。
 - **能力资产管理**：管理 Prompts、Rules、MCP、Plugins、Hooks 和项目工具集。
 - **Agent 观察与任务进度**：一键为 Claude Code / Codex 安装观察 Hook，实时查看工具活动、当前任务、当前步骤和进度。

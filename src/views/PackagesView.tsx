@@ -10,13 +10,13 @@ import {
   deletePkg,
   applyPkg,
   previewPkg,
+  previewPkgToProject,
   exportPkg,
   getPackage,
   applyPkgToProject,
   pickFolder,
   revealInFinder,
   pickSaveFolder,
-  saveProject,
 } from "../lib/tauri";
 import {
   Package as PackageIcon,
@@ -67,11 +67,6 @@ export default function PackagesView() {
   const [detailVersion, setDetailVersion] = useState(0);
   const [applyPlan, setApplyPlan] = useState<PackageApplyPlan | null>(null);
   const [planApplying, setPlanApplying] = useState(false);
-  const [projectOverwrite, setProjectOverwrite] = useState<{
-    pkg: PackageRow;
-    folder: string;
-    path: string;
-  } | null>(null);
   const deleteConfirmation = useDeleteConfirmation();
   const detailPkg = detailId ? packages.find((p) => p.id === detailId) ?? null : null;
   const filtered = packages.filter(
@@ -93,17 +88,31 @@ export default function PackagesView() {
     if (!applyPlan || planApplying) return;
     setPlanApplying(true);
     try {
-      await applyPkg(applyPlan.package_id, applyPlan.agent_id);
-      await useSkillsStore.getState().loadSkills();
-      await useAssetsStore.getState().loadRules();
-      await useExtensionsStore.getState().loadExtensions();
-      await useActivityStore.getState().loadActivity();
-      toast().show(
-        t("packages.appliedTo", {
-          name: applyPlan.package_name,
-          agent: applyPlan.agent_id,
-        }),
-      );
+      if (applyPlan.scope === "project") {
+        const projectPath = applyPlan.project_path;
+        if (!projectPath) throw new Error("project path missing");
+        await applyPkgToProject(applyPlan.package_id, projectPath, true);
+        await useSkillsStore.getState().loadSkills();
+        await useWorkspaceStore.getState().loadProjects();
+        await useActivityStore.getState().loadActivity();
+        toast().show(
+          t("packages.appliedToProject", {
+            name: projectPath.split("/").pop() || "",
+          }),
+        );
+      } else {
+        await applyPkg(applyPlan.package_id, applyPlan.agent_id);
+        await useSkillsStore.getState().loadSkills();
+        await useAssetsStore.getState().loadRules();
+        await useExtensionsStore.getState().loadExtensions();
+        await useActivityStore.getState().loadActivity();
+        toast().show(
+          t("packages.appliedTo", {
+            name: applyPlan.package_name,
+            agent: applyPlan.agent_id,
+          }),
+        );
+      }
       setApplyPlan(null);
     } catch (e) {
       toast().show(t("packages.applyFailed", { msg: String(e) }), "error");
@@ -116,38 +125,7 @@ export default function PackagesView() {
     try {
       const folder = await pickFolder();
       if (!folder) return;
-      try {
-        await applyPkgToProject(pkg.id, folder, false);
-      } catch (applyError) {
-        const message = String(applyError);
-        if (!message.includes("CONFIRM_PROJECT_OVERWRITE:")) throw applyError;
-        setProjectOverwrite({
-          pkg,
-          folder,
-          path: message.split("CONFIRM_PROJECT_OVERWRITE:")[1] || folder,
-        });
-        return;
-      }
-      const projName = folder.split("/").pop() || "untitled";
-      await saveProject({ id: "", name: projName, path: folder, color: "slate", sort_order: 0, skill_count: 0, created_at: "", updated_at: "" });
-      await useWorkspaceStore.getState().loadProjects();
-      await useActivityStore.getState().loadActivity();
-      toast().show(t("packages.appliedToProject", { name: folder.split("/").pop() || "" }));
-    } catch (e) {
-      toast().show(t("packages.applyFailed", { msg: String(e) }), "error");
-    }
-  };
-
-  const confirmProjectOverwrite = async () => {
-    if (!projectOverwrite) return;
-    const { pkg, folder } = projectOverwrite;
-    setProjectOverwrite(null);
-    try {
-      await applyPkgToProject(pkg.id, folder, true);
-      await useSkillsStore.getState().loadSkills();
-      await useWorkspaceStore.getState().loadProjects();
-      await useActivityStore.getState().loadActivity();
-      toast().show(t("packages.appliedToProject", { name: folder.split("/").pop() || "" }));
+      setApplyPlan(await previewPkgToProject(pkg.id, folder));
     } catch (e) {
       toast().show(t("packages.applyFailed", { msg: String(e) }), "error");
     }
@@ -258,27 +236,6 @@ export default function PackagesView() {
           onCancel={() => !planApplying && setApplyPlan(null)}
           onConfirm={confirmApply}
         />
-      )}
-
-      {projectOverwrite && (
-        <div
-          className="connection-dialog-overlay"
-          onMouseDown={(event) => event.target === event.currentTarget && setProjectOverwrite(null)}
-        >
-          <div role="dialog" aria-modal="true" className="connection-dialog">
-            <h3 className="connection-dialog-title">{t("packages.overwriteTitle")}</h3>
-            <p className="connection-dialog-message">{t("packages.overwriteMessage")}</p>
-            <code className="connection-dialog-path">{projectOverwrite.path}</code>
-            <div className="connection-dialog-actions">
-              <button className="btn btn-ghost btn-sm" onClick={() => setProjectOverwrite(null)}>
-                {t("common.cancel")}
-              </button>
-              <button className="btn btn-danger btn-sm" onClick={confirmProjectOverwrite}>
-                {t("packages.overwriteConfirm")}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       <PackageDetailDrawer
@@ -927,7 +884,10 @@ function PackageApplyPlanDialog({
         className="connection-dialog w-[min(680px,92vw)] max-h-[86vh] overflow-y-auto"
       >
         <h3 id="package-apply-plan-title" className="connection-dialog-title">
-          {plan.package_name} → {plan.agent_id}
+          {plan.package_name} →{" "}
+          {plan.scope === "project"
+            ? plan.project_path?.split("/").pop() || plan.agent_id
+            : plan.agent_id}
         </h3>
         <p className="connection-dialog-message">{t("packages.planMessage")}</p>
 

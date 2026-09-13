@@ -110,6 +110,52 @@ pub fn safe_config_target(root: &Path, file_name: &str) -> Result<PathBuf, Strin
     Ok(target)
 }
 
+/// Validate a project-relative target that may live in a nested config directory.
+/// All path components must be literal names, and existing ancestors must stay
+/// inside the canonical project root. Final symlinks are never followed.
+pub fn safe_project_target(root: &Path, relative: &Path) -> Result<PathBuf, String> {
+    if root.as_os_str().is_empty() {
+        return Err("项目根目录不能为空".to_string());
+    }
+    let invalid = relative
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)));
+    if invalid || relative.as_os_str().is_empty() {
+        return Err(format!("非法项目配置路径: {}", relative.to_string_lossy()));
+    }
+
+    let target = root.join(relative);
+    for ancestor in target.ancestors().skip(1) {
+        if fs::symlink_metadata(ancestor)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(format!("配置父目录是软链，拒绝写入: {}", ancestor.to_string_lossy()));
+        }
+    }
+    let deepest_existing = target
+        .ancestors()
+        .skip(1)
+        .find(|path| path.exists())
+        .ok_or_else(|| format!("配置路径没有项目根: {}", target.to_string_lossy()))?;
+    let canonical_root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    let canonical_existing = fs::canonicalize(deepest_existing).map_err(|error| error.to_string())?;
+    if !canonical_existing.starts_with(&canonical_root) {
+        return Err(format!(
+            "配置路径离开项目目录: {} -> {}",
+            relative.to_string_lossy(),
+            canonical_existing.to_string_lossy()
+        ));
+    }
+    if fs::symlink_metadata(&target)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(format!("配置目标是软链，拒绝覆盖: {}", target.to_string_lossy()));
+    }
+    Ok(target)
+}
+
 pub fn global_config_target(
     conn: &Connection,
     agent_id: &str,
@@ -442,6 +488,29 @@ mod tests {
         #[cfg(not(unix))]
         fs::write(&link, "file").unwrap();
         assert!(safe_config_target(&root, "CLAUDE.md").is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn safe_project_target_allows_nested_paths_and_rejects_escape() {
+        let root = std::env::temp_dir().join(format!(
+            "skilldeck-agent-project-safe-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join(".codex")).unwrap();
+        assert!(safe_project_target(&root, Path::new(".codex/config.toml")).is_ok());
+        assert!(safe_project_target(&root, Path::new("../outside.toml")).is_err());
+        assert!(safe_project_target(&root, Path::new("/tmp/outside.toml")).is_err());
+
+        #[cfg(unix)]
+        {
+            let link = root.join(".codex").join("config.toml");
+            std::os::unix::fs::symlink("/tmp/project-outside.toml", &link).unwrap();
+            assert!(safe_project_target(&root, Path::new(".codex/config.toml")).is_err());
+        }
         let _ = fs::remove_dir_all(&root);
     }
 }

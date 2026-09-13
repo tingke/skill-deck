@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- 项目级 Package 应用前生成变更计划，展示 Skill、项目 MCP 和规则文件的当前差异；应用时不再跳过项目 MCP。
+- 项目 MCP 写入可用的项目检测目标，包括可移植 `.mcp.json` 和已检测 Agent 的 JSON/TOML 配置，同时保留未知配置字段。
+
 ## [0.0.3] - 2026-09-13
 
 ### Added

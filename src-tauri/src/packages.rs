@@ -76,6 +76,7 @@ pub struct PackageApplyPlan {
     pub package_name: String,
     pub scope: String,
     pub agent_id: String,
+    pub project_path: Option<String>,
     pub actions: Vec<PackageApplyAction>,
     pub blocked_count: usize,
 }
@@ -441,6 +442,44 @@ fn config_apply_action(target: &Path, content: &str, kind: &str, name: &str) -> 
     }
 }
 
+fn mcp_apply_action(
+    target: &crate::project_packages::ProjectMcpTarget,
+    entry: &PackageMcpEntry,
+) -> PackageApplyAction {
+    match agent_config::read_mcp_entries(&agent_config::McpTarget {
+        path: target.path.to_string_lossy().to_string(),
+        format: target.format,
+    }) {
+        Ok(existing) => {
+            let unchanged = existing
+                .iter()
+                .any(|(name, config)| {
+                    name == &entry.name && canonical_json(config) == canonical_json(&entry.config_json)
+                });
+            PackageApplyAction {
+                kind: "mcp".into(),
+                name: entry.name.clone(),
+                action: if unchanged { "unchanged".into() } else { "upsert".into() },
+                target: target.path.to_string_lossy().to_string(),
+                detail: if unchanged {
+                    "MCP 配置一致".into()
+                } else {
+                    format!("将写入 {}", target.agent_id)
+                },
+                blocked: false,
+            }
+        }
+        Err(error) => PackageApplyAction {
+            kind: "mcp".into(),
+            name: entry.name.clone(),
+            action: "conflict".into(),
+            target: target.path.to_string_lossy().to_string(),
+            detail: error,
+            blocked: true,
+        },
+    }
+}
+
 pub fn preview_package_apply(
     conn: &Connection,
     package_id: &str,
@@ -495,6 +534,60 @@ pub fn preview_package_apply(
         package_name: detail.name,
         scope: "agent".into(),
         agent_id: runtime.to_string(),
+        project_path: None,
+        actions,
+        blocked_count,
+    })
+}
+
+pub fn preview_package_apply_to_project(
+    conn: &Connection,
+    package_id: &str,
+    project_path: &str,
+) -> Result<PackageApplyPlan, String> {
+    let detail = get_package_detail(conn, package_id).ok_or("package not found")?;
+    let project = PathBuf::from(project_path);
+    if !project.is_dir() {
+        return Err(format!("不是有效目录: {}", project_path));
+    }
+    let project = fs::canonicalize(&project).map_err(|error| error.to_string())?;
+    let skills_dir = project.join(".agents").join("skills");
+    let mut actions = Vec::new();
+
+    for entry in &detail.skills {
+        actions.push(skill_apply_action(conn, entry, &skills_dir));
+    }
+    let mcp_targets = crate::project_packages::project_mcp_targets(conn, &project)?;
+    for entry in &detail.mcps {
+        for target in &mcp_targets {
+            actions.push(mcp_apply_action(target, entry));
+        }
+    }
+    for entry in &detail.configs {
+        match agent_config::safe_project_target(&project, Path::new(&entry.file_name)) {
+            Ok(target) => actions.push(config_apply_action(
+                &target,
+                &entry.content,
+                "config",
+                &entry.file_name,
+            )),
+            Err(error) => actions.push(PackageApplyAction {
+                kind: "config".into(),
+                name: entry.file_name.clone(),
+                action: "conflict".into(),
+                target: entry.file_name.clone(),
+                detail: error,
+                blocked: true,
+            }),
+        }
+    }
+    let blocked_count = actions.iter().filter(|action| action.blocked).count();
+    Ok(PackageApplyPlan {
+        package_id: detail.id,
+        package_name: detail.name,
+        scope: "project".into(),
+        agent_id: project.to_string_lossy().to_string(),
+        project_path: Some(project.to_string_lossy().to_string()),
         actions,
         blocked_count,
     })
@@ -1173,6 +1266,16 @@ pub fn preview_pkg(
 }
 
 #[tauri::command(async)]
+pub fn preview_pkg_to_project(
+    db: State<DbState>,
+    id: String,
+    project_path: String,
+) -> Result<PackageApplyPlan, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    preview_package_apply_to_project(&conn, &id, &project_path)
+}
+
+#[tauri::command(async)]
 pub fn export_pkg(
     db: State<DbState>,
     id: String,
@@ -1232,13 +1335,37 @@ pub fn apply_package_to_project(
     project_path: &str,
     confirmed_overwrite: bool,
 ) -> Result<(), String> {
+    let plan = preview_package_apply_to_project(conn, package_id, project_path)?;
+    let project = PathBuf::from(
+        plan.project_path
+            .as_deref()
+            .ok_or("project apply plan missing project path")?,
+    );
+    if plan.blocked_count > 0 {
+        let blocked = plan
+            .actions
+            .iter()
+            .filter(|action| action.blocked)
+            .map(|action| format!("{}: {}", action.name, action.detail))
+            .collect::<Vec<_>>()
+            .join("；");
+        return Err(format!("APPLY_BLOCKED:{}", blocked));
+    }
+    let overwrite = plan
+        .actions
+        .iter()
+        .find(|action| action.kind == "config" && action.action == "overwrite");
+    if let Some(action) = overwrite {
+        if !confirmed_overwrite {
+            return Err(format!(
+                "CONFIRM_PROJECT_OVERWRITE:{}",
+                action.target
+            ));
+        }
+    }
+
     let detail = get_package_detail(conn, package_id)
         .ok_or_else(|| "package not found".to_string())?;
-    let project = PathBuf::from(project_path);
-    if !project.is_dir() {
-        return Err(format!("不是有效目录: {}", project_path));
-    }
-    let project = fs::canonicalize(&project).map_err(|error| error.to_string())?;
     let agents_dir = project.join(".agents");
     if fs::symlink_metadata(&agents_dir)
         .map(|metadata| metadata.file_type().is_symlink())
@@ -1267,21 +1394,6 @@ pub fn apply_package_to_project(
         resolved_skills.push((skill_id, source));
     }
 
-    let mut resolved_configs = Vec::new();
-    for entry in &detail.configs {
-        let target = agent_config::safe_config_target(&project, &entry.file_name)?;
-        let existing = fs::read_to_string(&target);
-        if let Ok(existing) = existing {
-            if existing != entry.content && !confirmed_overwrite {
-                return Err(format!(
-                    "CONFIRM_PROJECT_OVERWRITE:{}",
-                    target.to_string_lossy()
-                ));
-            }
-        }
-        resolved_configs.push((target, entry.content.clone()));
-    }
-
     fs::create_dir_all(&skills_dir).map_err(|error| error.to_string())?;
     for (skill_id, source) in resolved_skills {
         let canonical_source = fs::canonicalize(&source).map_err(|error| error.to_string())?;
@@ -1308,8 +1420,25 @@ pub fn apply_package_to_project(
         .ok();
     }
 
-    for (target, content) in resolved_configs {
-        agent_config::atomic_write(&target, content.as_bytes())?;
+    let mcp_targets = crate::project_packages::project_mcp_targets(conn, &project)?;
+    for target in &mcp_targets {
+        for entry in &detail.mcps {
+            agent_config::upsert_mcp_entry(
+                &agent_config::McpTarget {
+                    path: target.path.to_string_lossy().to_string(),
+                    format: target.format,
+                },
+                &entry.name,
+                &entry.config_json,
+                None,
+                false,
+            )?;
+        }
+    }
+
+    for entry in &detail.configs {
+        let target = agent_config::safe_project_target(&project, Path::new(&entry.file_name))?;
+        agent_config::atomic_write(&target, entry.content.as_bytes())?;
     }
 
     log_activity(conn, "package_apply_project", &format!("{} -> {}", detail.name, project_path));
@@ -1604,7 +1733,7 @@ components:
         .unwrap();
         let traversal =
             apply_package_to_project(&conn, &id, project.to_str().unwrap(), false).unwrap_err();
-        assert!(traversal.contains("非法配置文件名"));
+        assert!(traversal.contains("非法项目配置路径"));
         assert!(!dir.join("outside.md").exists());
 
         let id = save_package(
@@ -1666,5 +1795,73 @@ components:
         let missing = dir.join("missing-project");
         let err = apply_package_to_project(&conn, &id, missing.to_str().unwrap(), false).unwrap_err();
         assert!(err.contains("不是有效目录"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn project_preview_and_apply_writes_portable_and_agent_mcp() {
+        let dir = temp_dir("project-mcp");
+        let skill_dir = dir.join("lib").join("my-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "---\nname: my-skill\n---\n").unwrap();
+        let project = dir.join("project");
+        fs::create_dir_all(project.join(".codex")).unwrap();
+        fs::write(project.join("AGENTS.md"), "# Existing").unwrap();
+        fs::write(
+            project.join(".codex").join("config.toml"),
+            "unknown_section = true\n",
+        )
+        .unwrap();
+
+        let conn = open_in_memory();
+        insert_skill(&conn, "s1", "my-skill", &skill_dir);
+        let id = save_package(
+            &conn,
+            &PackageInput {
+                name: "project-mcp".into(),
+                display_name: Some("Project MCP".into()),
+                version: Some("0.1.0".into()),
+                description: None,
+                skills: vec![PackageSkillInput {
+                    name: "my-skill".into(),
+                    skill_id: Some("s1".into()),
+                    source_path: skill_dir.to_string_lossy().to_string(),
+                }],
+                mcps: vec![PackageMcpInput {
+                    name: "fetch".into(),
+                    config_json: r#"{"command":"fetch-server"}"#.into(),
+                }],
+                configs: vec![],
+            },
+            None,
+        )
+        .unwrap();
+
+        let plan = preview_package_apply_to_project(
+            &conn,
+            &id,
+            project.to_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(plan.scope, "project");
+        assert_eq!(plan.blocked_count, 0);
+        assert!(plan.actions.iter().any(|action| {
+            action.kind == "mcp"
+                && action.action == "upsert"
+                && action.target.ends_with(".mcp.json")
+        }));
+        assert!(plan.actions.iter().any(|action| {
+            action.kind == "mcp"
+                && action.action == "upsert"
+                && action.target.ends_with(".codex/config.toml")
+        }));
+
+        apply_package_to_project(&conn, &id, project.to_str().unwrap(), false).unwrap();
+        let portable: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(project.join(".mcp.json")).unwrap()).unwrap();
+        assert_eq!(portable["mcpServers"]["fetch"]["command"], "fetch-server");
+        let codex = fs::read_to_string(project.join(".codex").join("config.toml")).unwrap();
+        assert!(codex.contains("unknown_section = true"));
+        assert!(codex.contains("[mcp_servers.fetch]"));
+        assert!(codex.contains("fetch-server"));
     }
 }
