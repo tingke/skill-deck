@@ -4,15 +4,12 @@
 
 ## [Unreleased]
 
-### Added
-
-- 项目级 Package 应用前生成变更计划，展示 Skill、项目 MCP 和规则文件的当前差异；应用时不再跳过项目 MCP。
-- 项目 MCP 写入可用的项目检测目标，包括可移植 `.mcp.json` 和已检测 Agent 的 JSON/TOML 配置，同时保留未知配置字段。
-
 ## [0.0.3] - 2026-09-13
 
 ### Added
 
+- 项目级 Package 应用前生成变更计划，展示 Skill、项目 MCP 和规则文件的当前差异；应用时不再跳过项目 MCP。
+- 项目 MCP 写入可用的项目检测目标，包括可移植 `.mcp.json` 和已检测 Agent 的 JSON/TOML 配置，同时保留未知配置字段。
 - 应用内自动更新：通过官方 Updater 插件检查、下载并安装新版本（含签名校验），支持 macOS、Windows、Linux；发布流水线新增更新签名产物与 latest.json 清单。
 - 为 MCP、Hook 和 Plugin 的配置写入路径补充回归测试，覆盖只改目标条目、保留未知字段、幂等启用和空事件清理。
 - 新增 Agent MCP 配置统一解析：Package 应用和 MCP 管理读写同一配置目标，避免 Claude MCP 写入位置漂移，并支持注册表中的自定义 Agent。
