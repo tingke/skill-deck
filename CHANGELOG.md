@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-09-13
+
 ### Added
 
 - 应用内自动更新：通过官方 Updater 插件检查、下载并安装新版本（含签名校验），支持 macOS、Windows、Linux；发布流水线新增更新签名产物与 latest.json 清单。
