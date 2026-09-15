@@ -132,6 +132,9 @@ pub fn safe_project_target(root: &Path, relative: &Path) -> Result<PathBuf, Stri
         {
             return Err(format!("配置父目录是软链，拒绝写入: {}", ancestor.to_string_lossy()));
         }
+        if ancestor == root {
+            break;
+        }
     }
     let deepest_existing = target
         .ancestors()

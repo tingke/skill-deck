@@ -1786,7 +1786,10 @@ components:
 
         let link = project.join(".agents").join("skills").join("my-skill");
         assert!(link.is_symlink());
-        assert_eq!(fs::read_link(&link).unwrap(), skill_dir);
+        assert_eq!(
+            fs::read_link(&link).unwrap(),
+            fs::canonicalize(&skill_dir).unwrap()
+        );
         assert_eq!(
             fs::read_to_string(project.join("CLAUDE.md")).unwrap(),
             "# Project Rules"
