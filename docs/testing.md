@@ -1,17 +1,17 @@
 # 测试规范（Testing）
 
-> 最后更新：2026-08-29。当前测试体系是轻量的：Node test runner + Rust module tests + 源码契约检查，没有覆盖率阈值。
+> 最后更新：2026-09-15。当前测试体系是轻量的：Node test runner + Rust module tests + 源码契约检查，没有覆盖率阈值。
 
 ## 当前检查
 
 | 命令 | 覆盖内容 | 当前基线 |
 | --- | --- | --- |
-| `npm test` | 纯 TypeScript 逻辑与 Zustand 确认流 | 19 个 Node test |
+| `npm test` | 纯 TypeScript 逻辑与 Zustand 确认流 | 24 个 Node test |
 | `npm run test:layout` | App shell、Skills 布局、Tauri 窗口、drag region、设计 token 契约 | 通过 |
 | `npm run typecheck` | TypeScript strict 检查 | 通过 |
 | `npm run build` | typecheck + Vite production build | CI 前端必跑 |
 | `cd src-tauri && cargo check --locked` | Rust 编译与依赖检查 | CI 必跑 |
-| `cd src-tauri && cargo test --locked` | Rust 域逻辑和迁移 | 当前 72 个测试 |
+| `cd src-tauri && cargo test --locked` | Rust 域逻辑和迁移 | 当前 83 个测试通过、2 个网络测试默认忽略 |
 
 ## 前端单元测试
 
@@ -66,6 +66,14 @@ import test from "node:test";
   - 项目工具集提取与更新
 - 使用临时数据库/目录，不读写真实 `~`、应用数据目录或用户 Agent 配置。
 - 断言错误路径和路径未变化的情况，不只测试 happy path。
+
+市场同步包含两个显式 `#[ignore = "network"]` 的在线 smoke test。常规 CI 不访问外网；需要验证真实在线链路时运行：
+
+```bash
+cd src-tauri
+cargo test --locked official_registry_live_sync_smoke -- --ignored
+cargo test --locked installs_public_marketplace_skill_from_git_subdirectory -- --ignored
+```
 
 ## UI 手动验证
 

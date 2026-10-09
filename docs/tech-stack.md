@@ -18,7 +18,7 @@
 | 语言 | TypeScript 5.5，strict mode | 目标 ES2021；`npm run typecheck` 主要检查 `src/` |
 | 构建 | Vite 5 | 固定开发端口 5173，构建目标 ES2021 |
 | 样式 | Tailwind CSS 3.4 + 全局设计 token | token 和组件类主要在 `src/styles.css` 与 `tailwind.config.js` |
-| 状态 | Zustand 4 | 按领域拆分在 `src/stores/`：ui、skills、assets、extensions、workspace、packages、activity、toast |
+| 状态 | Zustand 4 | 按领域拆分在 `src/stores/`：ui、skills、assets、extensions、workspace、packages、activity、marketplace、toast |
 | 图标 | lucide-react、simple-icons | 不引入组件库 |
 | 桌面 API | `@tauri-apps/api` 2 | invoke 统一包装在 `src/lib/tauri.ts` |
 
@@ -35,6 +35,7 @@
 | TOML | toml 0.8 + indexmap 2 | 用于 Codex `config.toml` |
 | 文件选择 | rfd 0.15 | 系统 folder/file picker |
 | 打包 | zip 2，deflate only | `.ai-package.zip` 导入导出 |
+| HTTP / TLS | reqwest 0.13 + rustls 0.23（ring provider） | 仅用于用户显式触发的市场 HTTPS JSON 同步 |
 | 其他 | dirs 5、sha2 0.10、uuid v4 | 数据目录、内容哈希、ID 生成 |
 
 ## 项目脚本
@@ -80,4 +81,4 @@
 - WebView 启用 CSP；开发模式单独放宽 inline script 与 Vite HMR 端口。release 构建默认不启用 devtools，需要时用 cargo feature `devtools` 显式开启。
 - Skill 文件留在库源原位，Agent 入口用 symlink 接线。
 - 文件选择、备份恢复、连接和配置修改都发生在用户本机。
-- 除设置页更新检查访问 GitHub Releases 外，应用不依赖云端服务。
+- 除设置页更新检查访问 GitHub Releases、市场页用户显式点击同步时访问所选 HTTPS 目录外，应用不依赖云端服务；市场同步不携带账号、token 或本地数据。

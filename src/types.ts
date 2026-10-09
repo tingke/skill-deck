@@ -73,6 +73,7 @@ export type SkillSourceKind = "git" | "archive" | "path";
 export interface SkillSourceInput {
   kind: SkillSourceKind;
   source_ref: string;
+  subdir?: string | null;
 }
 
 export type InstallStatus =
@@ -171,7 +172,51 @@ export const AGENT_COLORS: Record<string, { bg: string; dot: string; text: strin
   workbuddy: { bg: "bg-violet-600", dot: "bg-violet-500", text: "text-violet-600" },
 };
 
-export type ViewKey = "dashboard" | "skills" | "audit" | "presets" | "prompts" | "rules" | "mcp" | "plugins" | "hooks" | "agents" | "projects" | "settings" | "design";
+export type ViewKey = "dashboard" | "market" | "skills" | "audit" | "presets" | "prompts" | "rules" | "mcp" | "plugins" | "hooks" | "agents" | "projects" | "settings" | "design";
+
+export interface MarketplaceInput {
+  name: string;
+  description: string;
+  placeholder: string;
+  is_secret: boolean;
+}
+
+export interface MarketplaceSkill {
+  id: string;
+  name: string;
+  description: string;
+  author: string;
+  tags: string[];
+  homepage: string | null;
+  source: SkillSourceInput;
+}
+
+export interface MarketplaceMcp {
+  id: string;
+  name: string;
+  server_name: string;
+  description: string;
+  author: string;
+  tags: string[];
+  version: string | null;
+  homepage: string | null;
+  config: Record<string, unknown> | null;
+  required_inputs: MarketplaceInput[];
+}
+
+export interface MarketplaceCatalog {
+  source_kind: string;
+  source_url: string;
+  name: string;
+  synced_at: string;
+  skills: MarketplaceSkill[];
+  mcps: MarketplaceMcp[];
+}
+
+export interface MarketplaceSyncInput {
+  url: string;
+  max_items?: number | null;
+}
 
 export interface ProjectRow {
   id: string;

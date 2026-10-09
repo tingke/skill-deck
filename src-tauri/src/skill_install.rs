@@ -10,12 +10,15 @@ use std::path::{Component, Path, PathBuf};
 use tauri::State;
 use uuid::Uuid;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct SkillSourceInput {
     /// "git" | "archive" | "path"
     pub kind: String,
     /// git URL / zip 文件路径 / 本地目录路径
     pub source_ref: String,
+    /// Git monorepo 中的 skill 相对目录；仅 market/git 子目录安装使用
+    #[serde(default)]
+    pub subdir: Option<String>,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -55,9 +58,9 @@ impl Drop for StagingGuard {
 }
 
 fn staging_root() -> PathBuf {
-    STAGING_ROOT.with(|root| root.borrow().clone()).unwrap_or_else(|| {
-        crate::db::data_dir().join("staging")
-    })
+    STAGING_ROOT
+        .with(|root| root.borrow().clone())
+        .unwrap_or_else(|| crate::db::data_dir().join("staging"))
 }
 
 thread_local! {
@@ -166,9 +169,9 @@ fn validate_zip_entry(name: &str) -> Result<(), String> {
     if path.is_absolute() {
         return Err(format!("压缩包包含绝对路径条目: {}", name));
     }
-    let unsafe_component = path.components().any(|component| {
-        matches!(component, Component::ParentDir | Component::Prefix(_))
-    });
+    let unsafe_component = path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)));
     if unsafe_component {
         return Err(format!("压缩包包含路径穿越条目: {}", name));
     }
@@ -261,7 +264,30 @@ fn collect_manifest_dirs(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
 }
 
 /// 在 fetch 结果中定位唯一 skill 根目录（含 SKILL.md / SKILL.md.disabled）。
-fn locate_skill_root(fetch_dir: &Path) -> Result<PathBuf, String> {
+fn locate_skill_root(fetch_dir: &Path, subdir: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(subdir) = subdir {
+        let relative = Path::new(subdir);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err("skill 子目录包含非法路径片段".to_string());
+        }
+        let candidate = fetch_dir.join(relative);
+        let fetch_canonical =
+            fs::canonicalize(fetch_dir).map_err(|e| format!("解析暂存目录失败: {}", e))?;
+        let candidate_canonical =
+            fs::canonicalize(&candidate).map_err(|_e| format!("skill 子目录不存在: {}", subdir))?;
+        if !candidate_canonical.starts_with(&fetch_canonical) {
+            return Err("skill 子目录逃逸暂存目录".to_string());
+        }
+        if !has_manifest(&candidate_canonical) {
+            return Err(format!("skill 子目录中未找到 SKILL.md: {}", subdir));
+        }
+        return Ok(candidate_canonical);
+    }
+
     if has_manifest(fetch_dir) {
         return Ok(fetch_dir.to_path_buf());
     }
@@ -271,6 +297,21 @@ fn locate_skill_root(fetch_dir: &Path) -> Result<PathBuf, String> {
         1 => Ok(candidates.pop().expect("candidates has exactly one item")),
         0 => Err("来源中未找到 SKILL.md（不支持空来源）".to_string()),
         n => Err(format!("来源包含 {} 个 skill，要求唯一", n)),
+    }
+}
+
+fn origin_ref_for(source: &SkillSourceInput) -> Result<String, String> {
+    serde_json::to_string(source).map_err(|e| format!("序列化安装来源失败: {}", e))
+}
+
+fn source_from_origin(kind: String, source_ref: String) -> SkillSourceInput {
+    if let Ok(source) = serde_json::from_str::<SkillSourceInput>(&source_ref) {
+        return source;
+    }
+    SkillSourceInput {
+        kind,
+        source_ref,
+        subdir: None,
     }
 }
 
@@ -286,10 +327,12 @@ fn derived_name(source: &SkillSourceInput) -> String {
         .unwrap_or(last);
     let cleaned: String = stem
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
-            c
-        } else {
-            '-'
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
         })
         .collect();
     let cleaned = cleaned.trim_matches('-').to_string();
@@ -396,7 +439,7 @@ pub fn install_skill_impl(
     let fetch_dir = staging.0.join("fetch");
     fs::create_dir_all(&fetch_dir).map_err(|e| format!("创建暂存目录失败: {}", e))?;
     fetch_source(source, &fetch_dir)?;
-    let root = locate_skill_root(&fetch_dir)?;
+    let root = locate_skill_root(&fetch_dir, source.subdir.as_deref())?;
     let skill_name = skill_name_for(&root, &fetch_dir, source);
     let target = library_dir.join(&skill_name);
 
@@ -442,15 +485,14 @@ pub fn install_skill_impl(
         &library.name,
         &library_dir.to_string_lossy(),
     );
-    let skill_id = find_installed_skill_id(conn, &target)?.ok_or_else(|| {
-        format!("安装完成但未能登记 skill: {}", target.display())
-    })?;
+    let skill_id = find_installed_skill_id(conn, &target)?
+        .ok_or_else(|| format!("安装完成但未能登记 skill: {}", target.display()))?;
 
     upsert_origin(
         conn,
         &skill_id,
         &source.kind,
-        &source.source_ref,
+        &origin_ref_for(source)?,
         &scan.version,
         &installed_hash,
     )?;
@@ -465,7 +507,11 @@ pub fn install_skill_impl(
             skill_name,
             source.kind,
             library.name,
-            if override_audit { " [override-audit]" } else { "" }
+            if override_audit {
+                " [override-audit]"
+            } else {
+                ""
+            }
         ),
     );
 
@@ -493,7 +539,7 @@ fn source_directory_hash(source: &SkillSourceInput) -> Result<String, String> {
     let fetch_dir = staging.0.join("fetch");
     fs::create_dir_all(&fetch_dir).map_err(|e| format!("创建暂存目录失败: {}", e))?;
     fetch_source(source, &fetch_dir)?;
-    let root = locate_skill_root(&fetch_dir)?;
+    let root = locate_skill_root(&fetch_dir, source.subdir.as_deref())?;
     Ok(scanner::directory_hash(&root))
 }
 
@@ -532,10 +578,7 @@ pub fn check_skill_updates_impl(
                 }
             };
 
-            let source = SkillSourceInput {
-                kind: origin_type,
-                source_ref: origin_ref,
-            };
+            let source = source_from_origin(origin_type, origin_ref);
             let latest_hash = source_directory_hash(&source);
             let local_hash = scanner::directory_hash(Path::new(&path));
 
@@ -583,15 +626,12 @@ pub fn update_skill_impl(
         )
         .map_err(|_| format!("skill 不存在或未记录安装来源: {}", skill_id))?;
 
-    let source = SkillSourceInput {
-        kind: origin_type.clone(),
-        source_ref: origin_ref.clone(),
-    };
+    let source = source_from_origin(origin_type.clone(), origin_ref.clone());
     let staging = StagingGuard::new("update");
     let fetch_dir = staging.0.join("fetch");
     fs::create_dir_all(&fetch_dir).map_err(|e| format!("创建暂存目录失败: {}", e))?;
     fetch_source(&source, &fetch_dir)?;
-    let root = locate_skill_root(&fetch_dir)?;
+    let root = locate_skill_root(&fetch_dir, source.subdir.as_deref())?;
     let latest_hash = scanner::directory_hash(&root);
 
     if latest_hash == installed_hash {
@@ -637,8 +677,9 @@ pub fn update_skill_impl(
     let backup = staging.0.join("backup");
     move_dir(Path::new(&path), &backup)?;
     if let Err(error) = move_dir(&root, Path::new(&path)) {
-        move_dir(&backup, Path::new(&path))
-            .map_err(|restore_error| format!("更新失败且回滚失败：{} / {}", error, restore_error))?;
+        move_dir(&backup, Path::new(&path)).map_err(|restore_error| {
+            format!("更新失败且回滚失败：{} / {}", error, restore_error)
+        })?;
         return Err(format!("更新失败，已回滚: {}", error));
     }
 
@@ -672,8 +713,16 @@ pub fn update_skill_impl(
             "{} ({}){}{}",
             name,
             origin_type,
-            if allow_local_changes { " [keep-local-off]" } else { "" },
-            if override_audit { " [override-audit]" } else { "" }
+            if allow_local_changes {
+                " [keep-local-off]"
+            } else {
+                ""
+            },
+            if override_audit {
+                " [override-audit]"
+            } else {
+                ""
+            }
         ),
     );
 
@@ -734,10 +783,7 @@ mod tests {
     }
 
     fn temp_root() -> TempDir {
-        let dir = std::env::temp_dir().join(format!(
-            "skill-deck-install-{}",
-            Uuid::new_v4()
-        ));
+        let dir = std::env::temp_dir().join(format!("skill-deck-install-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         TempDir(dir)
     }
@@ -811,6 +857,7 @@ mod tests {
             &SkillSourceInput {
                 kind: "path".into(),
                 source_ref: source.to_string_lossy().to_string(),
+                subdir: None,
             },
             "lib",
             false,
@@ -846,6 +893,7 @@ mod tests {
             &SkillSourceInput {
                 kind: "path".into(),
                 source_ref: source.to_string_lossy().to_string(),
+                subdir: None,
             },
             "lib",
             false,
@@ -859,6 +907,65 @@ mod tests {
     }
 
     #[test]
+    fn installs_and_updates_explicit_subdirectory_skill() {
+        let root = temp_root();
+        let source = root.0.join("repo");
+        write_skill(&source.join("skills/demo"), "v1");
+        write_skill(&source.join("skills/other"), "other");
+        let conn = test_db(&root.0.join("library"));
+        let input = SkillSourceInput {
+            kind: "path".into(),
+            source_ref: source.to_string_lossy().to_string(),
+            subdir: Some("skills/demo".to_string()),
+        };
+
+        let installed = install_skill_impl(&conn, &input, "lib", false).unwrap();
+        assert_eq!(installed.status, "installed");
+        assert!(root.0.join("library/demo/SKILL.md").is_file());
+        assert!(!root.0.join("library/other").exists());
+
+        fs::write(
+            source.join("skills/demo/SKILL.md"),
+            "---\nname: demo\nversion: 2.0.0\n---\n新内容\n",
+        )
+        .unwrap();
+        let availability = check_skill_updates_impl(&conn, &["lib:demo".to_string()])
+            .into_iter()
+            .next()
+            .unwrap();
+        assert!(availability.has_update);
+
+        let updated = update_skill_impl(&conn, "lib:demo", false, false).unwrap();
+        assert_eq!(updated.status, "updated");
+        assert!(fs::read_to_string(root.0.join("library/demo/SKILL.md"))
+            .unwrap()
+            .contains("新内容"));
+        assert!(!root.0.join("library/other").exists());
+    }
+
+    #[test]
+    #[ignore = "network"]
+    fn installs_public_marketplace_skill_from_git_subdirectory() {
+        let root = temp_root();
+        let conn = test_db(&root.0.join("library"));
+        let result = install_skill_impl(
+            &conn,
+            &SkillSourceInput {
+                kind: "git".to_string(),
+                source_ref: "https://github.com/vercel-labs/agent-browser".to_string(),
+                subdir: Some("skills/agent-browser".to_string()),
+            },
+            "lib",
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.status, "installed");
+        assert_eq!(result.skill_name, "agent-browser");
+        assert!(root.0.join("library/agent-browser/SKILL.md").is_file());
+    }
+
+    #[test]
     fn install_audit_block_requires_override() {
         let root = temp_root();
         let source = root.0.join("source/evil");
@@ -869,6 +976,7 @@ mod tests {
         let input = SkillSourceInput {
             kind: "path".into(),
             source_ref: source.to_string_lossy().to_string(),
+            subdir: None,
         };
         let blocked = install_skill_impl(&conn, &input, "lib", false).unwrap();
         assert_eq!(blocked.status, "audit_blocked");
@@ -896,6 +1004,7 @@ mod tests {
             &SkillSourceInput {
                 kind: "archive".into(),
                 source_ref: zip_path.to_string_lossy().to_string(),
+                subdir: None,
             },
             "lib",
             false,
@@ -908,8 +1017,16 @@ mod tests {
     fn locates_nested_skill_root() {
         let root = temp_root();
         write_skill(&root.0.join("repo/skills/nested"), "nested");
-        let located = locate_skill_root(&root.0.join("repo")).unwrap();
+        let located = locate_skill_root(&root.0.join("repo"), None).unwrap();
         assert!(located.ends_with("nested"));
+    }
+
+    #[test]
+    fn explicit_subdir_cannot_escape_staging_root() {
+        let root = temp_root();
+        write_skill(&root.0.join("repo/skills/nested"), "nested");
+        assert!(locate_skill_root(&root.0.join("repo"), Some("skills/nested")).is_ok());
+        assert!(locate_skill_root(&root.0.join("repo"), Some("../outside")).is_err());
     }
 
     #[test]
@@ -921,6 +1038,7 @@ mod tests {
         let input = SkillSourceInput {
             kind: "path".into(),
             source_ref: source.to_string_lossy().to_string(),
+            subdir: None,
         };
         install_skill_impl(&conn, &input, "lib", false).unwrap();
 

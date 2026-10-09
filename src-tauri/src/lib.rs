@@ -12,6 +12,7 @@ pub mod settings;
 pub mod skill_connections;
 pub mod skill_audit;
 pub mod skill_install;
+pub mod marketplace;
 
 use db::{DbState, open};
 use tauri::Manager;
@@ -135,6 +136,7 @@ pub fn run() {
             skill_install::install_skill,
             skill_install::update_skill,
             skill_install::check_skill_updates,
+            marketplace::sync_marketplace,
             // library sources (库源管理)
             commands::get_library_sources,
             commands::save_library_source,

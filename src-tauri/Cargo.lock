@@ -3503,8 +3503,10 @@ version = "0.0.3"
 dependencies = [
  "dirs 5.0.1",
  "indexmap 2.14.0",
+ "reqwest",
  "rfd",
  "rusqlite",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",

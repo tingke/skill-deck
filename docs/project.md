@@ -1,6 +1,6 @@
 # 项目身份（Project Identity）
 
-> 最后更新：2026-09-03。
+> 最后更新：2026-09-15。
 
 ## 名称与定位
 
@@ -18,7 +18,7 @@
 - [ ] 性能优化专项
 - [ ] 多人/组织治理
 
-当前迭代重点是 Skill 连接安全、工具集/预设、项目能力提取，以及 Claude Code / Codex 的本地活动观察。
+当前迭代重点是 Skill 连接安全、工具集/预设、项目能力提取、Claude Code / Codex 的本地活动观察，以及显式触发的在线市场目录同步。
 
 ## 当前功能边界
 
@@ -26,6 +26,7 @@
 
 - **Skill 库源与扫描**：登记多个本地库源；递归扫描 `SKILL.md`，读取描述、标签、作者、版本、许可、权限和内容哈希；默认主库源为 `~/.skill-deck`。
 - **Skill 安装与更新**：从 Git 仓库、Zip 包或本地目录安装到指定库源；记录来源、版本和目录哈希，支持更新检查、本地改动检测和事务性替换回滚。
+- **在线市场**：手动同步官方 MCP Registry 或自定义 HTTPS manifest；Skill 只接受 HTTPS Git 来源并复用暂存目录、静态审查、冲突保护和子目录边界检查；MCP 生成配置前保留密钥占位符，写入前展示目标与 JSON，同名条目需显式确认覆盖。
 - **Skill 安全审查**：安装与更新前执行静态审查；识别凭据读取、破坏性命令、提示注入、可执行二进制和 symlink 逃逸等风险，阻断级问题默认拦截并允许显式确认。
 - **Skill 接线**：以 symlink 连接或断开 Skill 与 Agent skills 目录；支持批量操作、启用/禁用 manifest、共享链接识别和显式确认。
 - **冲突安全**：区分 symlink、真实目录和真实文件；拒绝直接覆盖真实入口，支持把真实入口收纳进库源并保留连接。
@@ -40,11 +41,11 @@
 
 - 云同步、账号体系、团队权限和企业治理
 - 运行期权限沙箱或跨厂商权限强制
-- AI 能力市场与商业分发标准
+- 托管市场平台、账号体系、评分交易或商业分发标准
 - 无边界扫描整个 home 目录或整台电脑
 - 把 Skill 从原库复制成多份维护
 
-历史 PRD 中关于运行期权限强制、安装市场和跨机智能迁移的内容已被后续决策收缩；不要按旧 PRD 恢复这些承诺。
+历史 PRD 中关于运行期权限强制、商业市场和跨机智能迁移的内容已被后续决策收缩；不要按旧 PRD 恢复这些承诺。市场功能仅限用户显式触发 HTTPS 目录同步，不做云端托管或商业分发。
 
 ## 架构地图
 
@@ -55,7 +56,7 @@ src/
 ├── App.tsx                    # 应用壳、主导航、窗口拖拽、主题和视图挂载
 ├── components/                # 可复用对话框、Toast、详情抽屉、Agent 图标等
 ├── i18n/                      # 中英文文案，zh.ts / en.ts 需同步
-├── lib/                       # 纯逻辑与 Tauri invoke 包装
+├── lib/                       # 纯逻辑与 Tauri invoke 包装（含 marketplace 过滤与配置替换）
 ├── stores/                    # Zustand 状态与异步动作
 ├── views/                     # 每个一级页面的页面级组件
 ├── styles.css                 # 设计 token、布局组件和全局样式
@@ -73,6 +74,7 @@ src-tauri/src/
 ├── db.rs                      # SQLite 连接、schema、迁移、种子数据和行类型
 ├── scanner.rs                 # SKILL.md/frontmatter/库源扫描
 ├── skill_connections.rs       # symlink 探测、连接、断开、收纳和冲突保护
+├── marketplace.rs             # 在线市场 manifest / MCP Registry 同步与归一化
 ├── commands.rs                # Skills、库源、Prompts、Rules 等主命令
 ├── extensions.rs              # MCP/Hook/Plugin 扫描与配置写入
 ├── packages.rs                # 工具集保存、应用、导入导出

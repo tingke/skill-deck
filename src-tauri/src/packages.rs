@@ -1035,6 +1035,7 @@ fn build_package_from_components<R: Read + std::io::Seek>(
                     &crate::skill_install::SkillSourceInput {
                         kind: "path".to_string(),
                         source_ref: root.to_string_lossy().to_string(),
+                        subdir: None,
                     },
                     library_source_id,
                     override_audit,

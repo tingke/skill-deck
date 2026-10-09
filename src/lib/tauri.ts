@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   Skill, ActivityLog, Prompt, Rule, AgentInfo, ProjectRow, SkillConnectionState,
   AuditReport, InstallResult, SkillSourceInput, UpdateAvailability,
+  MarketplaceCatalog, MarketplaceSyncInput,
 } from "../types";
 import type { AgentRow } from "../types";
 
@@ -92,6 +93,10 @@ export const updateSkill = (
 
 export const checkSkillUpdates = (skillIds: string[]) =>
   invoke<UpdateAvailability[]>("check_skill_updates", { skillIds });
+
+// 在线市场同步；来源为自定义 marketplace manifest 或官方 MCP Registry
+export const syncMarketplace = (input: MarketplaceSyncInput) =>
+  invoke<MarketplaceCatalog>("sync_marketplace", { input });
 
 // 库源 (Library Sources)
 import type { LibrarySource } from "../types";

@@ -6,6 +6,8 @@ const tauriConfig = JSON.parse(read("../src-tauri/tauri.conf.json"));
 const capabilities = JSON.parse(read("../src-tauri/capabilities/default.json"));
 const app = read("../src/App.tsx");
 const skillsStore = read("../src/stores/skills.ts");
+const tauriWrapper = read("../src/lib/tauri.ts");
+const rustLib = read("../src-tauri/src/lib.rs");
 const skills = read("../src/views/SkillsView.tsx");
 const connectionDialog = read("../src/components/ConnectionConfirmationDialog.tsx");
 const skillDeleteDialog = read("../src/components/SkillDeleteDialog.tsx");
@@ -28,6 +30,17 @@ assert.ok(
 );
 
 assert.match(app, /data-testid="primary-sidebar"/, "primary navigation must expose a drawer test id");
+assert.match(
+  app,
+  /key: "market", label: t\("nav\.market"\)/,
+  "the marketplace entry must stay in primary navigation",
+);
+assert.match(rustLib, /marketplace::sync_marketplace,/, "marketplace sync command must stay registered");
+assert.match(
+  tauriWrapper,
+  /invoke<MarketplaceCatalog>\("sync_marketplace", \{ input \}\)/,
+  "marketplace sync must keep its typed frontend wrapper",
+);
 assert.match(app, /data-tauri-drag-region/, "overlay window must retain a drag region");
 assert.doesNotMatch(app, /h-9 border-b border-border/, "global white title strip must be removed");
 assert.match(app, /navExpanded/, "primary navigation drawer must be collapsible");

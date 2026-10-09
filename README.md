@@ -19,6 +19,7 @@ SkillDeck 是一个本地 AI Skill 管理器，用来集中管理 Skills、Promp
 - **Skill 库源管理**：登记多个本地库源，扫描 `SKILL.md`，查看描述、标签、权限和内容。
 - **Skill 安装与更新**：从 Git 仓库、Zip 压缩包或本地目录安装 Skill 到指定库源；记录安装来源与版本，支持检查更新、本地改动检测和事务性替换回滚。
 - **Skill 安全审查**：独立「审计」页提供全量/单个审查、规则清单（审查了什么）和 0-100 得分（怎么打分）；安装与更新前自动执行静态安全审查（凭据读取、破坏性命令、提示注入、可执行二进制、symlink 逃逸等），阻断级问题默认拦截，可显式确认放行。
+- **在线市场同步**：手动同步官方 MCP Registry，或配置自定义 HTTPS manifest；Skill 走原有安全审查安装链路，MCP 写入前展示目标 Agent 与完整 JSON，密钥只使用占位符并由用户显式填写。
 - **Agent 接线**：为 Skill 创建或断开到各 Agent skills 目录的链接，支持单选和批量操作。
 - **冲突识别**：区分软链接、真实目录和真实文件，避免误删或覆盖已有入口。
 - **场景预设**：按场景维护 Skill 组合，一键切换当前 Agent 的能力挂载。
@@ -26,7 +27,7 @@ SkillDeck 是一个本地 AI Skill 管理器，用来集中管理 Skills、Promp
 - **安全应用与导出**：应用预设前查看变更计划；导入会安装并审查打包 Skill；导出默认脱敏 MCP 凭证字段。
 - **能力资产管理**：管理 Prompts、Rules、MCP、Plugins、Hooks 和项目工具集。
 - **Agent 观察与任务进度**：一键为 Claude Code / Codex 安装观察 Hook，实时查看工具活动、当前任务、当前步骤和进度。
-- **本地数据**：数据和 SQLite 数据库保存在本机，不依赖云端服务。
+- **本地数据**：数据和 SQLite 数据库保存在本机；应用不内置云端服务，市场目录只在点击同步时访问用户选择的 HTTPS 来源。
 
 ## 技术栈
 
@@ -107,6 +108,53 @@ macOS 数据目录：
 `progress` 支持 `0-1` 比例或 `0-100` 百分比。未上报进度时仍会显示任务、状态、步骤和最近活动，进度显示为 `--`。
 
 已有 `ai-hub` 数据库会在首次启动 SkillDeck 时复制到新的数据目录，原文件保留不删。
+
+## 市场与在线同步
+
+1. 进入「市场」，默认来源是官方 MCP Registry：`https://registry.modelcontextprotocol.io/v0.1/servers`。同步只读取 HTTPS JSON，不会上传本地数据或凭证。
+2. 切换到「自定义 manifest」后，可以配置自己的 HTTPS JSON 目录，例如：
+
+   ```json
+   {
+     "version": 1,
+     "name": "Team Marketplace",
+     "skills": [
+       {
+         "id": "team/design",
+         "name": "design",
+         "description": "Interface review guidelines",
+         "author": "team",
+         "tags": ["design"],
+         "homepage": "https://example.com/design",
+         "source": {
+           "kind": "git",
+           "source_ref": "https://github.com/example/skills",
+           "subdir": "skills/design"
+         }
+       }
+     ],
+     "mcps": [
+       {
+         "id": "team/github",
+         "name": "GitHub",
+         "server_name": "github",
+         "description": "GitHub MCP",
+         "config": {
+           "command": "npx",
+           "args": ["-y", "@modelcontextprotocol/server-github"],
+           "env": { "GITHUB_TOKEN": "{{config.GITHUB_TOKEN}}" }
+         },
+         "required_inputs": [
+           { "name": "GITHUB_TOKEN", "description": "GitHub token", "is_secret": true }
+         ]
+       }
+     ]
+   }
+   ```
+
+3. Skill 安装仍先进入暂存目录并执行静态安全审查；阻断、警告或同名冲突不会被静默跳过。
+4. MCP 安装前会展示完整 JSON 和目标 Agent。需要密钥的条目使用 `{{config.*}}` 占位符，只有用户填写后才会写入配置；同名 MCP 必须显式确认覆盖。
+5. MCP Registry 中无法自动、安全转换为当前 Agent 配置格式的条目会标记为「需手动配置」，不会自动写入猜测配置。
 
 ## 发布
 
