@@ -280,16 +280,15 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
 }
 
-fn validate_https_url_shape(raw: &str) -> Result<Url, String> {
+/// 公共 HTTPS 形状校验：必须 https、不带凭证、不指向本机/IP；
+/// 锚点（fragment）与查询参数是否允许由调用方决定。
+fn parse_public_https_url(raw: &str) -> Result<Url, String> {
     let url = Url::parse(raw).map_err(|e| format!("无效 URL: {}", e))?;
     if url.scheme() != "https" {
         return Err("市场来源仅支持 HTTPS".to_string());
     }
     if !url.username().is_empty() || url.password().is_some() {
         return Err("市场 URL 不允许携带凭证".to_string());
-    }
-    if url.fragment().is_some() {
-        return Err("市场 URL 不允许携带 fragment".to_string());
     }
     let Some(host) = url.host_str() else {
         return Err("市场 URL 缺少 host".to_string());
@@ -302,6 +301,20 @@ fn validate_https_url_shape(raw: &str) -> Result<Url, String> {
         return Err("市场来源不允许直接使用 IP 地址".to_string());
     }
     Ok(url)
+}
+
+fn validate_https_url_shape(raw: &str) -> Result<Url, String> {
+    let url = parse_public_https_url(raw)?;
+    if url.fragment().is_some() {
+        return Err("市场 URL 不允许携带 fragment".to_string());
+    }
+    Ok(url)
+}
+
+/// 展示型链接（homepage）校验：与来源 URL 相比允许 fragment / query——
+/// 深链锚点（如 https://example.com/docs#section）是正常用法。
+fn validate_https_homepage(raw: &str) -> Result<Url, String> {
+    parse_public_https_url(raw)
 }
 
 fn validate_https_url(raw: &str) -> Result<Url, String> {
@@ -518,7 +531,7 @@ fn parse_manifest(raw: &[u8], source_url: &str) -> Result<MarketplaceCatalog, St
         validate_tags(&skill.tags)?;
         validate_skill_source(&skill.source)?;
         if let Some(homepage) = skill.homepage.as_deref() {
-            validate_https_url_shape(homepage)?;
+            validate_https_homepage(homepage)?;
         }
         if !ids.insert(skill.id.clone()) {
             return Err(format!("市场条目 ID 重复: {}", skill.id));
@@ -542,7 +555,7 @@ fn parse_manifest(raw: &[u8], source_url: &str) -> Result<MarketplaceCatalog, St
         validate_limited_text(&mcp.server_name, "MCP server 名称", 200)?;
         validate_tags(&mcp.tags)?;
         if let Some(homepage) = mcp.homepage.as_deref() {
-            validate_https_url_shape(homepage)?;
+            validate_https_homepage(homepage)?;
         }
         if let Some(config) = mcp.config.as_ref() {
             if !config.is_object() {
@@ -844,18 +857,13 @@ fn parse_registry_page(
         let server = entry.server;
         let (config, required_inputs) =
             registry_config(&server).unwrap_or((serde_json::Value::Null, Vec::new()));
+        // homepage 只是展示链接：允许锚点；个别条目数据不合法时丢弃链接保留条目，
+        // 不因外部目录里的单条脏数据让整个同步失败
         let homepage = server
             .website_url
             .clone()
-            .or_else(|| server.repository.and_then(|repo| repo.url));
-        if let Some(homepage) = homepage.as_deref() {
-            if validate_https_url_shape(homepage).is_err() {
-                return Err(format!(
-                    "MCP Registry 条目包含不安全的 homepage: {}",
-                    homepage
-                ));
-            }
-        }
+            .or_else(|| server.repository.and_then(|repo| repo.url))
+            .filter(|link| validate_https_homepage(link).is_ok());
         let mut tags = vec!["registry".to_string()];
         let has_config = !config.is_null();
         if !has_config {
@@ -1115,6 +1123,44 @@ mod tests {
             "{{config.Authorization}}"
         );
         assert!(mcps[0].required_inputs[0].is_secret);
+    }
+
+    #[test]
+    fn registry_allows_anchor_homepages_and_drops_unsafe_links() {
+        // 真实 Registry 数据曾出现带锚点的 homepage（.../developers.html#mcp），
+        // 不能因单条展示链接的形状让整个目录同步失败
+        let raw = br#"{
+          "servers": [
+            {
+              "server": {
+                "name": "example/anchor",
+                "description": "Anchor homepage",
+                "version": "1.0.0",
+                "websiteUrl": "https://0si.ai/developers.html#mcp"
+              },
+              "_meta": {"io.modelcontextprotocol.registry/official": {"isLatest": true}}
+            },
+            {
+              "server": {
+                "name": "example/insecure",
+                "description": "Insecure homepage",
+                "version": "1.0.0",
+                "websiteUrl": "http://insecure.example.com/docs"
+              },
+              "_meta": {"io.modelcontextprotocol.registry/official": {"isLatest": true}}
+            }
+          ],
+          "metadata": {}
+        }"#;
+        let mut seen = HashMap::new();
+        let (mcps, _) = parse_registry_page(raw, &mut seen).unwrap();
+        assert_eq!(mcps.len(), 2);
+        assert_eq!(
+            mcps[0].homepage.as_deref(),
+            Some("https://0si.ai/developers.html#mcp")
+        );
+        // 非 https 的展示链接只丢弃链接本身，条目保留
+        assert_eq!(mcps[1].homepage, None);
     }
 
     #[test]
