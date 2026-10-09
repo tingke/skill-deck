@@ -438,7 +438,7 @@ export const en: Record<TranslationKey, string> = {
   // Library sources
   "settings.libs.title": "Library Sources",
   "settings.libs.add": "Add library source",
-  "settings.libs.desc": "Register skill source directories and enable or disable them for scanning. Library sources are discovery-only; they are not loaded into any Agent directly.",
+  "settings.libs.desc": "The single home and install target for skills. A library directory must contain only skills — it cannot overlap with projects, Agent skills directories, or other libraries.",
   "settings.libs.empty": "No library sources yet — add one",
   "settings.libs.nameLabel": "Library name",
   "settings.libs.namePlaceholder": "Library name (e.g. Main, Writing)",
@@ -453,6 +453,7 @@ export const en: Record<TranslationKey, string> = {
   "settings.libs.addFailed": "Add failed",
   "settings.libs.deleted": "Library source deleted",
   "settings.libs.deleteFailed": "Delete failed",
+  "settings.libs.deleteWarning": "Deleting only removes the registration — files stay on disk, and symlinks already linked to Agents will be left dangling.",
   "settings.libs.enabled": "Enabled",
   "settings.libs.disabled": "Disabled",
 

@@ -1,6 +1,7 @@
 use crate::db::{
-    db_enabled_agents, db_enabled_library_sources, db_library_sources, log_activity, now_iso,
-    ActivityLog, AgentRow, DbState, LibrarySourceRow, PromptRow, RuleRow, RuntimeInfo, SkillRow,
+    db_agents, db_enabled_agents, db_enabled_library_sources, db_library_sources, log_activity,
+    now_iso, ActivityLog, AgentRow, DbState, LibrarySourceRow, PromptRow, RuleRow, RuntimeInfo,
+    SkillRow,
 };
 use crate::projects;
 use crate::scanner;
@@ -29,6 +30,73 @@ fn resolve_library_path(path: &str) -> PathBuf {
         return PathBuf::from(path);
     }
     home.join(path)
+}
+
+/// 目录重叠判定：相同、互为祖先/后代（按路径组件比较）。
+fn paths_overlap(a: &Path, b: &Path) -> bool {
+    a.starts_with(b) || b.starts_with(a)
+}
+
+/// 尽力 canonicalize（消除 symlink 别名）；目标不存在时退回原路径。
+fn normalized_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// 校验库源路径不与其他扫描身份重叠（项目、agent skills 目录、其他库源）。
+/// 库源要求是"纯 skill 集合"目录；重叠会让同一目录被两种身份扫描，skill 重复登记
+/// （库源扫描递归含隐藏目录，项目扫描扫 <project>/.agents/skills）。
+fn validate_library_path(conn: &rusqlite::Connection, id: &str, raw_path: &str) -> Result<(), String> {
+    let new_path = normalized_path(&resolve_library_path(raw_path));
+
+    let projects: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT name, path FROM projects")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+    for (name, path) in &projects {
+        if paths_overlap(&new_path, &normalized_path(&resolve_library_path(path))) {
+            return Err(format!("库源路径与项目「{}」的目录重叠：{}", name, path));
+        }
+    }
+
+    for agent in db_agents(conn) {
+        let custom: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![format!("{}_skills_dir", agent.id)],
+                |row| row.get(0),
+            )
+            .ok();
+        let skills_dir = custom.unwrap_or_else(|| agent.skills_dir.clone());
+        let resolved = normalized_path(&resolve_library_path(&skills_dir));
+        if paths_overlap(&new_path, &resolved) {
+            return Err(format!(
+                "库源路径与 {} 的 skills 目录重叠：{}",
+                agent.label, skills_dir
+            ));
+        }
+    }
+
+    let others: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT name, path FROM library_sources WHERE id != ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+    for (name, path) in &others {
+        if paths_overlap(&new_path, &normalized_path(&resolve_library_path(path))) {
+            return Err(format!("库源路径与其他库源「{}」的目录重叠：{}", name, path));
+        }
+    }
+
+    Ok(())
 }
 
 /// 在访达中定位（高亮）给定文件/目录。无论入口是文件还是目录，都在父目录中选中它。
@@ -753,6 +821,18 @@ pub fn get_library_sources(db: State<DbState>) -> Result<Vec<LibrarySourceRow>, 
 #[tauri::command]
 pub fn save_library_source(db: State<DbState>, source: LibrarySourceRow) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    // 仅在新增或改址时校验重叠；路径未变的启用/禁用不校验，
+    // 避免阻断对历史遗留重叠库源的补救操作
+    let stored: Option<String> = conn
+        .query_row(
+            "SELECT path FROM library_sources WHERE id = ?1",
+            params![source.id],
+            |row| row.get(0),
+        )
+        .ok();
+    if stored.as_deref() != Some(source.path.as_str()) {
+        validate_library_path(&conn, &source.id, &source.path)?;
+    }
     let ts = now_iso();
     conn.execute(
         "INSERT INTO library_sources (id, name, path, enabled, sort_order, created_at, updated_at)
@@ -1142,4 +1222,111 @@ pub fn scan_rules(db: State<DbState>) -> Result<Vec<RuleRow>, String> {
         &format!("扫描完成，新增 {} 条", new_count),
     );
     Ok(query_rules(&conn))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_in_memory;
+    use std::env;
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            TempDir(env::temp_dir().join(format!(
+                "skilldeck-libcheck-{}-{}",
+                tag,
+                uuid::Uuid::new_v4()
+            )))
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn add_project(conn: &rusqlite::Connection, id: &str, name: &str, path: &Path) {
+        conn.execute(
+            "INSERT INTO projects (id, name, path, created_at, updated_at) VALUES (?1, ?2, ?3, 'now', 'now')",
+            params![id, name, path.to_string_lossy().to_string()],
+        )
+        .unwrap();
+    }
+
+    fn add_library_source(conn: &rusqlite::Connection, id: &str, name: &str, path: &Path) {
+        conn.execute(
+            "INSERT INTO library_sources (id, name, path, enabled, sort_order, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 1, 0, 'now', 'now')",
+            params![id, name, path.to_string_lossy().to_string()],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn library_path_rejects_project_overlap() {
+        let conn = open_in_memory();
+        let project = TempDir::new("project");
+        std::fs::create_dir_all(&project.0).unwrap();
+        add_project(&conn, "writer", "Writer", &project.0);
+
+        // 同目录、子目录、父目录三个方向都算重叠
+        let err = validate_library_path(&conn, "lib", &project.0.to_string_lossy())
+            .expect_err("same dir as project should conflict");
+        assert!(err.contains("Writer"));
+
+        let nested = project.0.join(".agents/skills");
+        // macOS 上 /var 是 /private/var 的 symlink：目录需真实存在，
+        // 让两侧都走 canonicalize，避免前缀比较失配
+        std::fs::create_dir_all(&nested).unwrap();
+        let err = validate_library_path(&conn, "lib", &nested.to_string_lossy())
+            .expect_err("dir inside project should conflict");
+        assert!(err.contains("Writer"));
+    }
+
+    #[test]
+    fn library_path_rejects_agent_skills_dir_overlap() {
+        let conn = open_in_memory();
+        let dir = TempDir::new("agent");
+        std::fs::create_dir_all(&dir.0).unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('claude_skills_dir', ?1)",
+            params![dir.0.to_string_lossy().to_string()],
+        )
+        .unwrap();
+
+        let err = validate_library_path(&conn, "lib", &dir.0.to_string_lossy())
+            .expect_err("agent skills dir overlap should conflict");
+        assert!(err.contains("Claude"));
+    }
+
+    #[test]
+    fn library_path_rejects_other_library_overlap() {
+        let conn = open_in_memory();
+        let root = TempDir::new("libs");
+        let existing = root.0.join("main");
+        std::fs::create_dir_all(&existing).unwrap();
+        add_library_source(&conn, "existing", "主库", &existing);
+
+        let nested = existing.join("collection");
+        std::fs::create_dir_all(&nested).unwrap();
+        let err = validate_library_path(&conn, "other", &nested.to_string_lossy())
+            .expect_err("nested library should conflict");
+        assert!(err.contains("主库"));
+    }
+
+    #[test]
+    fn library_path_allows_disjoint_dirs() {
+        let conn = open_in_memory();
+        let project = TempDir::new("project");
+        let lib = TempDir::new("lib");
+        std::fs::create_dir_all(&project.0).unwrap();
+        std::fs::create_dir_all(&lib.0).unwrap();
+        add_project(&conn, "writer", "Writer", &project.0);
+
+        validate_library_path(&conn, "lib", &lib.0.to_string_lossy())
+            .expect("disjoint dirs should not conflict");
+    }
 }

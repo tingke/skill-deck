@@ -4,12 +4,14 @@ import type { DeleteConfirmationController } from "../lib/deleteConfirmation";
 
 export function DeleteConfirmDialogBody({
   name,
+  warning,
   deleting,
   onCancel,
   onConfirm,
   testId = "delete-confirm-dialog",
 }: {
   name: string;
+  warning?: string;
   deleting: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -41,6 +43,11 @@ export function DeleteConfirmDialogBody({
           <p className="connection-dialog-message">
             {t("common.deleteConfirmMessage", { name })}
           </p>
+          {warning && (
+            <p className="connection-dialog-message text-amber-600 dark:text-amber-400">
+              {warning}
+            </p>
+          )}
           <div className="connection-dialog-actions">
             <button
               type="button"
@@ -78,6 +85,7 @@ export default function DeleteConfirmDialog({
   return (
     <DeleteConfirmDialogBody
       name={controller.confirmation.name}
+      warning={controller.confirmation.warning}
       deleting={controller.deleting}
       onCancel={controller.cancel}
       onConfirm={controller.confirm}

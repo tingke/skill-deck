@@ -124,8 +124,10 @@ function LibrarySourcesSection() {
       setNewName("");
       setNewPath("");
       toast().show(t("settings.libs.added"));
-    } catch {
-      toast().show(t("settings.libs.addFailed"), "error");
+    } catch (e) {
+      // 后端会返回具体的校验失败原因（如与项目目录重叠），优先展示
+      const detail = typeof e === "string" && e.trim() ? e : t("settings.libs.addFailed");
+      toast().show(detail, "error");
     }
   };
 
@@ -170,7 +172,9 @@ function LibrarySourcesSection() {
             skillCount={countForLib(lib.name)}
             homeDirectory={homeDirectory}
             onToggle={() => handleToggle(lib)}
-            onDelete={() => deleteConfirmation.request(lib.name, () => handleDelete(lib))}
+            onDelete={() =>
+              deleteConfirmation.request(lib.name, () => handleDelete(lib), t("settings.libs.deleteWarning"))
+            }
           />
         ))}
         {librarySources.length === 0 && (

@@ -4,6 +4,8 @@ import { useT } from "../i18n";
 
 export interface DeleteConfirmation {
   name: string;
+  /** 额外警示说明（如：删除库源后软链残留），显示在确认正文下方 */
+  warning?: string;
   action: () => void | Promise<void>;
 }
 
@@ -13,8 +15,8 @@ export function useDeleteConfirmation() {
   const [confirmation, setConfirmation] = useState<DeleteConfirmation | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const request = useCallback((name: string, action: () => void | Promise<void>) => {
-    setConfirmation({ name, action });
+  const request = useCallback((name: string, action: () => void | Promise<void>, warning?: string) => {
+    setConfirmation({ name, action, warning });
   }, []);
 
   const cancel = useCallback(() => {

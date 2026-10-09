@@ -436,7 +436,7 @@ export const zh = {
   // Library sources
   "settings.libs.title": "库源管理",
   "settings.libs.add": "添加库源",
-  "settings.libs.desc": "登记 skill 来源目录，启用 / 禁用参与扫描。库源只作为发现源，不直接加载到任何 Agent。",
+  "settings.libs.desc": "Skill 的唯一归属地和安装目标。目录须为纯 skill 集合，不能与项目、Agent skills 目录或其他库源重叠。",
   "settings.libs.empty": "还没有库源，添加一个吧",
   "settings.libs.nameLabel": "库源名称",
   "settings.libs.namePlaceholder": "库源名称（如：主库、写作库）",
@@ -451,6 +451,7 @@ export const zh = {
   "settings.libs.addFailed": "添加失败",
   "settings.libs.deleted": "库源已删除",
   "settings.libs.deleteFailed": "删除失败",
+  "settings.libs.deleteWarning": "删除只移除登记，库源目录中的文件会保留；已连接到 Agent 的软链会残留成为死链。",
   "settings.libs.enabled": "已启用",
   "settings.libs.disabled": "已禁用",
 
