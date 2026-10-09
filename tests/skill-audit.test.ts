@@ -11,9 +11,9 @@ import {
 import { formatAuditTime } from "../src/lib/auditTime";
 
 test("audit verdict meta maps known verdicts and rejects unknown values", () => {
-  assert.equal(auditVerdictMeta("pass")?.label, "通过");
-  assert.equal(auditVerdictMeta("warn")?.label, "警告");
-  assert.equal(auditVerdictMeta("block")?.label, "阻断");
+  assert.equal(auditVerdictMeta("pass")?.label, "安全");
+  assert.equal(auditVerdictMeta("warn")?.label, "需留意");
+  assert.equal(auditVerdictMeta("block")?.label, "危险");
   assert.equal(auditVerdictMeta(null), null);
   assert.equal(auditVerdictMeta("unknown"), null);
 });
@@ -68,4 +68,8 @@ test("formatAuditTime renders local MM-DD HH:mm and tolerates invalid input", ()
   assert.equal(formatAuditTime("not-a-date"), "not-a-date");
   const local = new Date(2026, 8, 13, 9, 5); // 本地时区 2026-09-13 09:05
   assert.equal(formatAuditTime(local.toISOString()), "09-13 09:05");
+  // 后端 skill_audits.created_at 存的是 epoch 秒字符串
+  assert.equal(formatAuditTime(String(Math.floor(local.getTime() / 1000))), "09-13 09:05");
+  // epoch 毫秒同样支持
+  assert.equal(formatAuditTime(String(local.getTime())), "09-13 09:05");
 });

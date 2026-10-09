@@ -278,8 +278,18 @@ export default function SettingsView() {
       setUpdatePhase("idle");
       setProgress(0);
       if (!found) toast().show(t("settings.upToDate"));
-    } catch {
-      toast().show(t("settings.checkFailed"), "error");
+    } catch (error) {
+      // 发布源暂无 latest.json（首个带更新清单的版本发布前）时，updater 插件把
+      // 404 统一报成 "Could not fetch a valid release JSON from the remote"——
+      // 语义上就是"远程没有可用更新"，按已最新处理，不当作故障
+      const message = String(error);
+      if (/could not fetch a valid release|releaseNotFound|404|not found/i.test(message)) {
+        setUpdate(null);
+        setUpdatePhase("idle");
+        toast().show(t("settings.upToDate"));
+      } else {
+        toast().show(t("settings.checkFailed"), "error");
+      }
     } finally { setChecking(false); }
   };
 
@@ -427,7 +437,7 @@ export default function SettingsView() {
         >
           <div className="space-y-2.5 text-xs">
             <KV label={t("settings.projectName")} value="SkillDeck" />
-            <KV label={t("settings.version")} value={appInfo?.version ?? "0.0.2"} />
+            <KV label={t("settings.version")} value={appInfo?.version ?? "—"} />
             <p className="text-muted leading-relaxed pt-1">
               {t("settings.appDescription")}
             </p>

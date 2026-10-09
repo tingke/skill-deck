@@ -1,17 +1,17 @@
 # 测试规范（Testing）
 
-> 最后更新：2026-09-15。当前测试体系是轻量的：Node test runner + Rust module tests + 源码契约检查，没有覆盖率阈值。
+> 最后更新：2026-10-09。当前测试体系是轻量的：Node test runner + Rust module tests + 源码契约检查，没有覆盖率阈值。
 
 ## 当前检查
 
 | 命令 | 覆盖内容 | 当前基线 |
 | --- | --- | --- |
-| `npm test` | 纯 TypeScript 逻辑与 Zustand 确认流 | 24 个 Node test |
+| `npm test` | 纯 TypeScript 逻辑与 Zustand 确认流 | 31 个 Node test |
 | `npm run test:layout` | App shell、Skills 布局、Tauri 窗口、drag region、设计 token 契约 | 通过 |
 | `npm run typecheck` | TypeScript strict 检查 | 通过 |
 | `npm run build` | typecheck + Vite production build | CI 前端必跑 |
 | `cd src-tauri && cargo check --locked` | Rust 编译与依赖检查 | CI 必跑 |
-| `cd src-tauri && cargo test --locked` | Rust 域逻辑和迁移 | 当前 83 个测试通过、2 个网络测试默认忽略 |
+| `cd src-tauri && cargo test --locked` | Rust 域逻辑和迁移 | 当前 88 个测试通过、2 个网络测试默认忽略 |
 
 ## 前端单元测试
 

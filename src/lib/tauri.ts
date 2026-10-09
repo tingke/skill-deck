@@ -94,7 +94,7 @@ export const updateSkill = (
 export const checkSkillUpdates = (skillIds: string[]) =>
   invoke<UpdateAvailability[]>("check_skill_updates", { skillIds });
 
-// 在线市场同步；来源为自定义 marketplace manifest 或官方 MCP Registry
+// 在线商店目录同步；来源为团队自定义 manifest 或官方 MCP Registry
 export const syncMarketplace = (input: MarketplaceSyncInput) =>
   invoke<MarketplaceCatalog>("sync_marketplace", { input });
 

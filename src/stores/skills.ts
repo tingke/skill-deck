@@ -387,14 +387,14 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
         ),
       }));
       toast().show(
-        report.verdict === "pass" ? "安全审查通过" : report.verdict === "warn" ? "安全审查有警告" : "安全审查发现阻断问题",
+        report.verdict === "pass" ? "安全检查通过" : report.verdict === "warn" ? "安全检查：需留意" : "安全检查：发现危险",
         report.verdict === "pass" ? "success" : "error",
       );
       refreshActivity();
     } catch (error) {
       set({ auditingSkill: false });
       console.error(error);
-      toast().show("安全审查失败", "error");
+      toast().show("安全检查失败", "error");
     }
   },
 }));

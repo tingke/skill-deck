@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import * as api from "./lib/tauri";
 import { useUiStore } from "./stores/ui";
 import { useSkillsStore } from "./stores/skills";
 import { useAssetsStore } from "./stores/assets";
@@ -24,7 +25,7 @@ import ToastContainer from "./components/Toast";
 import AgentActivityNotifier from "./components/AgentActivityNotifier";
 import ConnectionConfirmationDialog from "./components/ConnectionConfirmationDialog";
 import SkillDeleteDialog from "./components/SkillDeleteDialog";
-import { LayoutDashboard, FileText, Settings as SettingsIcon, BookOpen, Plug, Layers, Webhook, Server, Sun, Moon, Monitor, FolderKanban, PanelLeftClose, PanelLeftOpen, RefreshCw, ShieldCheck, Store } from "lucide-react";
+import { LayoutDashboard, FileText, Settings as SettingsIcon, BookOpen, Plug, Layers, Webhook, Server, Sun, Moon, FolderKanban, PanelLeftClose, PanelLeftOpen, RefreshCw, ShieldCheck, Store } from "lucide-react";
 import { Cpu } from "lucide-react";
 import logoUrl from "./assets/logo.png";
 import type { ViewKey } from "./types";
@@ -229,13 +230,19 @@ function WorkspaceToolbar({
 
 function ThemeSwitcher({ theme, onChange }: { theme: string; onChange: (t: "light" | "dark" | "system") => void }) {
   const t = useT();
-  const cycle: { id: "light" | "dark" | "system"; icon: React.ReactNode; label: string }[] = [
+  // 标题栏只在浅色 / 深色间切换；「跟随系统」保留在设置页。
+  // 跟随系统时按系统当前偏好解析出实际模式：图标显示实际模式，
+  // 且点击总是切到"与当前所见相反"的模式
+  const cycle: { id: "light" | "dark"; icon: React.ReactNode; label: string }[] = [
     { id: "light", icon: <Sun size={14} />, label: t("settings.light") },
     { id: "dark", icon: <Moon size={14} />, label: t("settings.dark") },
-    { id: "system", icon: <Monitor size={14} />, label: t("settings.system") },
   ];
-  const cur = cycle.find((c) => c.id === theme) || cycle[0];
-  const nextIdx = (cycle.findIndex((c) => c.id === theme) + 1) % cycle.length;
+  const systemDark =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const resolved = theme === "system" ? (systemDark ? "dark" : "light") : theme;
+  const cur = cycle.find((c) => c.id === resolved) || cycle[0];
+  const nextIdx = (cycle.findIndex((c) => c.id === resolved) + 1) % cycle.length;
   return (
     <button
       data-testid="theme-toggle"
@@ -260,6 +267,8 @@ function Sidebar({
   expanded: boolean;
 }) {
 const t = useT();
+ const [appVersion, setAppVersion] = useState("");
+ useEffect(() => { api.getAppInfo().then((info) => setAppVersion(info.version)).catch(() => {}); }, []);
  const skills = useSkillsStore((s) => s.skills);
  const prompts = useAssetsStore((s) => s.prompts);
  const rules = useAssetsStore((s) => s.rules);
@@ -329,7 +338,7 @@ const items: { key: ViewKey; label: string; icon: React.ReactNode; badge?: numbe
        >
          <SettingsIcon size={17} />
          {expanded && <span className="truncate">{t("nav.settings")}</span>}
-        {expanded && <span className="ml-auto text-2xs font-mono opacity-70">v0.0.2</span>}
+        {expanded && appVersion && <span className="ml-auto text-2xs font-mono opacity-70">v{appVersion}</span>}
      </button>
     </div>
     </aside>

@@ -10,3 +10,4 @@ docs/*
 !docs/workflow.md
 node_modules
 .claude/
+designs/

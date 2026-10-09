@@ -97,12 +97,12 @@ function AuditVerdictIcon({ verdict }: { verdict?: string | null }) {
     return <span title="安全审查通过"><ShieldCheck size={13} className="inline text-emerald-500" /></span>;
   }
   if (verdict === "warn") {
-    return <span title="安全审查有警告"><TriangleAlert size={13} className="inline text-amber-500" /></span>;
+    return <span title="安全体检：需留意"><TriangleAlert size={13} className="inline text-amber-500" /></span>;
   }
   if (verdict === "block") {
-    return <span title="安全审查阻断"><OctagonX size={13} className="inline text-red-500" /></span>;
+    return <span title="安全体检：危险"><OctagonX size={13} className="inline text-red-500" /></span>;
   }
-  return <span title="尚未审查"><Clock size={13} className="inline text-faint opacity-40" /></span>;
+  return <span title="未检查"><Clock size={13} className="inline text-faint opacity-40" /></span>;
 }
 
 // ---- Table row ----
@@ -397,7 +397,7 @@ function SkillAuditSection({ skill }: { skill: Skill }) {
       <button
         onClick={openAudit}
         className="w-full flex items-center gap-2 rounded-lg border border-border-subtle bg-surface-2 px-3 py-2 text-left transition-colors hover:border-violet-300 dark:hover:border-violet-700 group"
-        title="查看审计详情"
+        title="查看体检详情"
       >
         {meta ? (
           <span className={"text-2xs px-2 py-0.5 rounded-md font-medium " + meta.badge}>
@@ -423,7 +423,7 @@ function SkillAuditSection({ skill }: { skill: Skill }) {
           </span>
         )}
         <span className="ml-auto flex items-center gap-0.5 text-2xs text-faint group-hover:text-violet-500 transition-colors">
-          审计详情 <ChevronRight size={11} />
+          体检详情 <ChevronRight size={11} />
         </span>
       </button>
     </div>
@@ -1079,7 +1079,7 @@ export default function SkillsView() {
           <span>名称</span>
           <span className="text-center">智能体</span>
           <span className="text-center">权限</span>
-          <span className="text-center">审计</span>
+          <span className="text-center">体检</span>
           <span className="text-center">状态</span>
         </div>
 
