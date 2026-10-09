@@ -2,14 +2,7 @@
 
 本文件记录 SkillDeck 的用户可见变化。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
-
-### Fixed
-
-- 商店同步官方目录不再因个别条目的 homepage 数据失败：带锚点（如 `.../developers.html#mcp`）的链接合法保留，非 HTTPS 链接只丢弃该链接并保留条目；manifest 的 homepage 同样允许锚点。
-- 设置页「检查更新」在发布源暂无 `latest.json`（updater 插件报 "Could not fetch a valid release JSON"）时按「已是最新版本」处理，不再报「检查更新失败」。
-- 安全体检页合并重复的两套筛选：状态统计卡（新增「全部」）即筛选入口，移除下方筛选 tab 行。
-- 标题栏主题切换在「跟随系统」模式下按系统当前偏好显示浅色/深色图标，且点击总是切到与当前所见相反的模式（修复跟随浅色时点击无变化）。
+## [0.0.3] - 2026-10-09
 
 ### Added
 
@@ -25,11 +18,6 @@
 - 项目页新增预设漂移状态，可识别缺少预设、目录不可用、待同步数量和已同步状态。
 - 当前项目识别：根据本地 Agent 活动的 working/waiting 项目路径，在项目列表中标记当前项目。
 - 项目预设一键同步现在会先刷新项目扫描，再更新对应 Package 并刷新漂移状态。
-
-## [0.0.3] - 2026-09-13
-
-### Added
-
 - 项目级 Package 应用前生成变更计划，展示 Skill、项目 MCP 和规则文件的当前差异；应用时不再跳过项目 MCP。
 - 项目 MCP 写入可用的项目检测目标，包括可移植 `.mcp.json` 和已检测 Agent 的 JSON/TOML 配置，同时保留未知配置字段。
 - 应用内自动更新：通过官方 Updater 插件检查、下载并安装新版本（含签名校验），支持 macOS、Windows、Linux；发布流水线新增更新签名产物与 latest.json 清单。
@@ -51,6 +39,11 @@
 
 ### Fixed
 
+- 商店同步官方目录不再因个别条目的 homepage 数据失败：带锚点（如 `.../developers.html#mcp`）的链接合法保留，非 HTTPS 链接只丢弃该链接并保留条目；manifest 的 homepage 同样允许锚点。
+- 设置页「检查更新」在发布源暂无 `latest.json`（updater 插件报 "Could not fetch a valid release JSON"）时按「已是最新版本」处理，不再报「检查更新失败」。
+- 安全体检页合并重复的两套筛选：状态统计卡（新增「全部」）即筛选入口，移除下方筛选 tab 行。
+- 安全体检详情合并相同检查项：按规则与描述聚合展示次数，全部位置收进展开层。
+- 标题栏主题切换在「跟随系统」模式下按系统当前偏好显示浅色/深色图标，且点击总是切到与当前所见相反的模式（修复跟随浅色时点击无变化）。
 - 前端测试脚本自动发现 `tests/*.test.ts`，新增测试文件不会再被静默跳过。
 - 修复用户主目录不可用时部分命令可能 panic 的问题。
 - 修复 AI Package YAML manifest 解析时跳过首个组件的问题。
