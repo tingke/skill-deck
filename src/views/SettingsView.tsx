@@ -43,9 +43,9 @@ function LibrarySourceRow({
       <Folder size={14} className="text-faint shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="text-xs font-medium text-content">{lib.name}</div>
-        <div className="text-[11px] text-faint font-mono truncate">{shortPath}</div>
+        <div className="text-[13px] text-faint font-mono truncate">{shortPath}</div>
       </div>
-      <span className={"text-[10px] font-mono px-2 py-0.5 rounded-full shrink-0 " +
+      <span className={"text-[12px] font-mono px-2 py-0.5 rounded-full shrink-0 " +
         (lib.enabled ? "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400" : "bg-surface-2 text-faint")}>
         {t("settings.libs.skillCount", { count: skillCount })}
       </span>
@@ -161,7 +161,7 @@ function LibrarySourcesSection() {
         </button>
       }
     >
-      <p className="text-[11px] text-faint pb-3">{t("settings.libs.desc")}</p>
+      <p className="text-[13px] text-faint pb-3">{t("settings.libs.desc")}</p>
       <div className="divide-y divide-border-subtle">
         {librarySources.map((lib) => (
           <LibrarySourceRow
@@ -194,7 +194,7 @@ function LibrarySourcesSection() {
 
             <div className="px-5 py-4 space-y-3">
               <div>
-                <label className="text-[11px] text-faint mb-1 block">{t("settings.libs.nameLabel")}</label>
+                <label className="text-[13px] text-faint mb-1 block">{t("settings.libs.nameLabel")}</label>
                 <input
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
@@ -204,7 +204,7 @@ function LibrarySourcesSection() {
                 />
               </div>
               <div>
-                <label className="text-[11px] text-faint mb-1 block">{t("settings.libs.pathLabel")}</label>
+                <label className="text-[13px] text-faint mb-1 block">{t("settings.libs.pathLabel")}</label>
                 <div className="flex items-center gap-2">
                   <input
                     value={newPath}
@@ -482,7 +482,7 @@ function Row({ label, desc, children }: { label: string; desc?: string; children
     <div className="flex items-center justify-between gap-4 py-1.5">
       <div className="min-w-0">
         <p className="text-xs font-medium text-muted">{label}</p>
-        {desc && <p className="text-[11px] text-faint mt-0.5">{desc}</p>}
+        {desc && <p className="text-[13px] text-faint mt-0.5">{desc}</p>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -493,7 +493,7 @@ function KV({ label, value, mono }: { label: string; value: string; mono?: boole
   return (
     <div className="flex items-baseline gap-2">
       <span className="text-muted w-20 shrink-0">{label}</span>
-      <span className={"text-muted " + (mono ? "font-mono text-[11px] break-all" : "")}>{value}</span>
+      <span className={"text-muted " + (mono ? "font-mono text-[13px] break-all" : "")}>{value}</span>
     </div>
   );
 }
@@ -523,7 +523,7 @@ function UpdateResult({
 }) {
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-[11px] text-blue-600 dark:text-blue-400">
+      <span className="text-[13px] text-blue-600 dark:text-blue-400">
         {t("settings.newVersionAvailable", { version: update.version })}
       </span>
       {phase === "downloaded" ? (

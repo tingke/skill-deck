@@ -116,12 +116,12 @@ export default function AgentsView() {
                       <h3 className="text-sm font-semibold text-heading truncate">
                         {a.label}
                         {a.auto_scan && (
-                          <span className="ml-1.5 text-[9px] font-normal text-faint border border-border-strong rounded px-1 py-0.5">
+                          <span className="ml-1.5 text-[11px] font-normal text-faint border border-border-strong rounded px-1 py-0.5">
                             auto-scan
                           </span>
                         )}
                       </h3>
-                      <code className="text-[10px] text-faint font-mono">{a.id}</code>
+                      <code className="text-[12px] text-faint font-mono">{a.id}</code>
                     </div>
                   </div>
                   <div className="flex items-center gap-0.5 shrink-0">
@@ -139,17 +139,17 @@ export default function AgentsView() {
                 </div>
 
                 <div className="mt-3 space-y-1.5">
-                  <div className="flex items-center gap-2 text-[11px] text-muted">
+                  <div className="flex items-center gap-2 text-[13px] text-muted">
                     <FolderTree size={12} className="shrink-0 text-faint" />
                     <code className="font-mono truncate">~/{a.skills_dir}</code>
                   </div>
-                  <div className="flex items-center gap-2 text-[11px] text-muted">
+                  <div className="flex items-center gap-2 text-[13px] text-muted">
                     <FileCog size={12} className="shrink-0 text-faint" />
                     <code className="font-mono truncate">~/{a.config_dir}/{a.mcp_config_file || t("common.none")}</code>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 mt-3 text-[11px]">
+                <div className="flex items-center gap-3 mt-3 text-[13px]">
                   <span className="text-faint">
                     <span className={`font-semibold ${c.text}`}>{countSkills(a.id)}</span> skills
                   </span>
@@ -394,7 +394,7 @@ function AgentEditor({
         <div className="px-5 py-4 space-y-3 flex-1 overflow-y-auto">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[11px] text-faint mb-1 block">{t("agents.idLabel")}</label>
+              <label className="text-[13px] text-faint mb-1 block">{t("agents.idLabel")}</label>
               <input
                 value={id}
                 onChange={(e) => setId(e.target.value)}
@@ -404,7 +404,7 @@ function AgentEditor({
               />
             </div>
             <div>
-              <label className="text-[11px] text-faint mb-1 block">{t("agents.displayLabel")}</label>
+              <label className="text-[13px] text-faint mb-1 block">{t("agents.displayLabel")}</label>
               <input
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
@@ -415,7 +415,7 @@ function AgentEditor({
           </div>
 
           <div>
-            <label className="text-[11px] text-faint mb-1 block">{t("agents.skillsDir")}</label>
+            <label className="text-[13px] text-faint mb-1 block">{t("agents.skillsDir")}</label>
             <input
               value={skillsDir}
               onChange={(e) => setSkillsDir(e.target.value)}
@@ -426,7 +426,7 @@ function AgentEditor({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[11px] text-faint mb-1 block">{t("agents.configDir")}</label>
+              <label className="text-[13px] text-faint mb-1 block">{t("agents.configDir")}</label>
               <input
                 value={configDir}
                 onChange={(e) => setConfigDir(e.target.value)}
@@ -435,7 +435,7 @@ function AgentEditor({
               />
             </div>
             <div>
-              <label className="text-[11px] text-faint mb-1 block">{t("agents.mcpFile")}</label>
+              <label className="text-[13px] text-faint mb-1 block">{t("agents.mcpFile")}</label>
               <input
                 value={mcpFile}
                 onChange={(e) => setMcpFile(e.target.value)}
@@ -447,7 +447,7 @@ function AgentEditor({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[11px] text-faint mb-1 block">{t("common.color")}</label>
+              <label className="text-[13px] text-faint mb-1 block">{t("common.color")}</label>
               <div className="flex items-center gap-1.5 flex-wrap">
                 {Object.entries(COLOR_MAP).map(([name, c]) => (
                   <button
@@ -462,7 +462,7 @@ function AgentEditor({
               </div>
             </div>
             <div>
-              <label className="text-[11px] text-faint mb-1 block">{t("common.sortOrder")}</label>
+              <label className="text-[13px] text-faint mb-1 block">{t("common.sortOrder")}</label>
               <input
                 type="number"
                 value={sortOrder}

@@ -64,7 +64,7 @@ export default function PluginsView() {
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex items-center gap-3 px-6 py-3 border-b border-border bg-surface">
         <h2 className="text-sm font-semibold text-content dark:text-heading">{t("plugins.title")}</h2>
-        <span className="text-[11px] text-faint">{t("plugins.desc")}</span>
+        <span className="text-[13px] text-faint">{t("plugins.desc")}</span>
         <div className="flex items-center gap-2 ml-auto">
         </div>
       </div>

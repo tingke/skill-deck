@@ -161,13 +161,13 @@ export default function DashboardView() {
                 <div key={rt.id} className="flex items-center gap-2.5">
                   <AgentGlyph id={rt.id} label={rt.label} size={22} />
                   <span className="text-xs dark:text-faint">{rt.label}</span>
-                  <span className="text-[10px] text-muted font-mono ml-auto truncate">{displayDir}</span>
-                  <span className={"text-[10px] font-medium " + color.text}>{t("dashboard.connected", { count })}</span>
+                  <span className="text-[12px] text-muted font-mono ml-auto truncate">{displayDir}</span>
+                  <span className={"text-[12px] font-medium " + color.text}>{t("dashboard.connected", { count })}</span>
                 </div>
               );
             })}
           </div>
-          <button onClick={() => setView("skills")} className="flex items-center gap-1 text-[11px] text-faint hover:text-accent mt-3 transition-colors">
+          <button onClick={() => setView("skills")} className="flex items-center gap-1 text-[13px] text-faint hover:text-accent mt-3 transition-colors">
             <BookOpen size={12} /> {t("dashboard.goSkills")} <Link2 size={12} />
           </button>
         </div>
@@ -189,7 +189,7 @@ export default function DashboardView() {
                     <span className="font-medium">{t(ACTION_LABEL_KEYS[a.action] ?? "activity.unknown")}</span>
                     <span className="text-faint"> · {activityDetail(a.action, a.detail, t)}</span>
                   </span>
-                  <span className="text-[10px] text-faint shrink-0">{timeAgo(a.created_at, t)}</span>
+                  <span className="text-[12px] text-faint shrink-0">{timeAgo(a.created_at, t)}</span>
                 </div>
               ))}
             </div>
@@ -200,7 +200,7 @@ export default function DashboardView() {
         <div className="card p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
             <h3 className="text-xs font-semibold text-muted uppercase tracking-wider">{t("dashboard.agentActivity")}</h3>
-            <button onClick={() => setView("hooks")} className="text-[11px] text-faint hover:text-accent transition-colors">
+            <button onClick={() => setView("hooks")} className="text-[13px] text-faint hover:text-accent transition-colors">
               {t("dashboard.configureHooks")}
             </button>
           </div>

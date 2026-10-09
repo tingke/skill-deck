@@ -214,7 +214,7 @@ export default function ProjectsView() {
                   </div>
 
                  <div className="mt-2">
-                   <div className="flex items-center gap-1.5 text-[11px] text-muted">
+                   <div className="flex items-center gap-1.5 text-[13px] text-muted">
                      <FolderOpen size={11} className="shrink-0" />
                      <code
                        className="font-mono truncate flex-1 cursor-pointer hover:text-content dark:hover:text-content transition-colors"
@@ -226,7 +226,7 @@ export default function ProjectsView() {
                    </div>
                  </div>
 
-                  <div className="flex items-center gap-3 mt-3 text-[11px]">
+                  <div className="flex items-center gap-3 mt-3 text-[13px]">
                     <span className="text-faint flex items-center gap-0.5">
                       <BookOpen size={11} /> <span className={`font-semibold ${c.text}`}>{t("projects.skillCount", { count: projectSkills.length })}</span>
                     </span>
@@ -263,12 +263,12 @@ export default function ProjectsView() {
                   {projectSkills.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-2">
                       {projectSkills.slice(0, 6).map((s) => (
-                        <span key={s.id} className="text-[10px] text-muted bg-surface-2  px-1.5 py-0.5 rounded truncate max-w-[120px]">
+                        <span key={s.id} className="text-[12px] text-muted bg-surface-2  px-1.5 py-0.5 rounded truncate max-w-[120px]">
                           {s.name}
                         </span>
                       ))}
                       {projectSkills.length > 6 && (
-                        <span className="text-[10px] text-faint">+{projectSkills.length - 6}</span>
+                        <span className="text-[12px] text-faint">+{projectSkills.length - 6}</span>
                       )}
                     </div>
                   )}
@@ -340,7 +340,7 @@ function ProjectEditor({
 
         <div className="px-5 py-4 space-y-3">
           <div>
-            <label className="text-[11px] text-faint mb-1 block">{t("projects.nameLabel")}</label>
+            <label className="text-[13px] text-faint mb-1 block">{t("projects.nameLabel")}</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -349,13 +349,13 @@ function ProjectEditor({
             />
           </div>
           <div>
-            <label className="text-[11px] text-faint mb-1 block">{t("projects.pathLabel")}</label>
+            <label className="text-[13px] text-faint mb-1 block">{t("projects.pathLabel")}</label>
             <code className="text-xs text-muted font-mono block px-3 py-1.5 bg-surface-2  rounded-lg break-all">
               {project.path}
             </code>
           </div>
           <div>
-            <label className="text-[11px] text-faint mb-1 block">{t("common.color")}</label>
+            <label className="text-[13px] text-faint mb-1 block">{t("common.color")}</label>
             <div className="flex items-center gap-1.5 flex-wrap">
               {Object.entries(COLOR_MAP).map(([n, c]) => (
                 <button

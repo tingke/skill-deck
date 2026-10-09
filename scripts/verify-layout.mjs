@@ -208,6 +208,6 @@ const componentSources = readdirSync(new URL("../src/components", import.meta.ur
   .filter((name) => name.endsWith(".tsx"))
   .map((name) => read(`../src/components/${name}`))
   .join("");
-assert.doesNotMatch(`${app}${skills}${styles}${componentSources}`, /text-\[(?:9|10|11)px\]/, "arbitrary 9, 10, and 11px font sizes must be replaced by type tokens");
+assert.doesNotMatch(`${app}${skills}${styles}${componentSources}`, /text-\[(?:11|12|13)px\]/, "arbitrary 11, 12, and 13px font sizes must be replaced by type tokens");
 
 console.log("Layout and Tauri window contract checks passed");

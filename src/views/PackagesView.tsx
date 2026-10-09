@@ -275,15 +275,15 @@ function PackageCard({
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-heading truncate">{title}</h3>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="text-[10px] text-faint font-mono">v{pkg.version}</span>
+            <span className="text-[12px] text-faint font-mono">v{pkg.version}</span>
             {pkg.description && (
-              <span className="text-[11px] text-muted truncate">{pkg.description}</span>
+              <span className="text-[13px] text-muted truncate">{pkg.description}</span>
             )}
           </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-2 mt-2 text-[11px] text-faint">
+      <div className="flex items-center gap-2 mt-2 text-[13px] text-faint">
         <span className="flex items-center gap-0.5"><BookOpen size={11} /> {pkg.skill_count}</span>
         <span className="flex items-center gap-0.5"><Server size={11} /> {pkg.mcp_count}</span>
         <span className="flex items-center gap-0.5"><FileText size={11} /> {pkg.config_count}</span>
@@ -641,7 +641,7 @@ function PackageEditor({
           <>
             <div className="px-5 py-4 grid grid-cols-2 gap-3 border-b border-border-subtle">
               <div>
-                <label className="text-[11px] text-faint mb-1 block">{t("packages.nameLabel")}</label>
+                <label className="text-[13px] text-faint mb-1 block">{t("packages.nameLabel")}</label>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -650,7 +650,7 @@ function PackageEditor({
                 />
               </div>
               <div>
-                <label className="text-[11px] text-faint mb-1 block">{t("packages.displayNameLabel")}</label>
+                <label className="text-[13px] text-faint mb-1 block">{t("packages.displayNameLabel")}</label>
                 <input
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
@@ -659,7 +659,7 @@ function PackageEditor({
                 />
               </div>
               <div>
-                <label className="text-[11px] text-faint mb-1 block">{t("packages.versionLabel")}</label>
+                <label className="text-[13px] text-faint mb-1 block">{t("packages.versionLabel")}</label>
                 <input
                   value={version}
                   onChange={(e) => setVersion(e.target.value)}
@@ -667,7 +667,7 @@ function PackageEditor({
                 />
               </div>
               <div>
-                <label className="text-[11px] text-faint mb-1 block">{t("packages.descLabel")}</label>
+                <label className="text-[13px] text-faint mb-1 block">{t("packages.descLabel")}</label>
                 <input
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -706,7 +706,7 @@ function PackageEditor({
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-sm text-content">{s.name}</span>
-                          <span className="text-[10px] text-faint">{s.source_lib}</span>
+                          <span className="text-[12px] text-faint">{s.source_lib}</span>
                         </div>
                         {s.description && <p className="text-xs text-faint mt-0.5 line-clamp-1">{s.description}</p>}
                       </div>
@@ -807,7 +807,7 @@ function McpTab({
                       className="w-full flex items-center justify-between gap-2 text-left px-2.5 py-1.5 text-xs text-muted hover:bg-surface-hover"
                     >
                       <span>{ext.name}</span>
-                      <span className="text-[10px] text-faint">{ext.runtime}</span>
+                      <span className="text-[12px] text-faint">{ext.runtime}</span>
                     </button>
                   ))}
                 </div>
@@ -837,9 +837,9 @@ function McpTab({
             onChange={(e) => updateMcp(i, { config_json: e.target.value })}
             rows={5}
             placeholder='{"command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{}}'
-            className="w-full px-2 py-1 text-[11px] border border-border rounded bg-page text-muted font-mono"
+            className="w-full px-2 py-1 text-[13px] border border-border rounded bg-page text-muted font-mono"
           />
-          <div className="text-[10px] text-faint">
+          <div className="text-[12px] text-faint">
             {t("mcp.applyMergeHint", { agents: agentOptions.map((r) => r.label).join(" / ") })}
           </div>
         </div>
@@ -990,7 +990,7 @@ function ConfigsTab({
                       className="w-full flex items-center justify-between gap-2 text-left px-2.5 py-1.5 text-xs text-muted hover:bg-surface-hover"
                     >
                       <span className="truncate">{rule.title}</span>
-                      <span className="text-[10px] text-faint shrink-0">{rule.platform}</span>
+                      <span className="text-[12px] text-faint shrink-0">{rule.platform}</span>
                     </button>
                   ))}
                 </div>
@@ -1045,9 +1045,9 @@ function ConfigsTab({
             }}
             rows={5}
             placeholder={t("packages.ruleContentPlaceholder")}
-            className="w-full px-2 py-1.5 text-[11px] font-mono border border-border rounded bg-page text-muted focus:outline-none"
+            className="w-full px-2 py-1.5 text-[13px] font-mono border border-border rounded bg-page text-muted focus:outline-none"
           />
-          <div className="text-[10px] text-faint mt-0.5">
+          <div className="text-[12px] text-faint mt-0.5">
             {t("packages.applyMergeHint")} <code className="font-mono">~/.{c.agent}/{c.file_name}</code>
           </div>
         </div>

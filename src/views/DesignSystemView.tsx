@@ -26,10 +26,10 @@ const accentSwatches = [
 ];
 
 const typeScale = [
-  ["2xs / 10px", "text-[10px]", "Badges, counters"],
-  ["xs / 12px", "text-xs", "Buttons, nav, labels"],
-  ["sm / 14px", "text-sm", "Body text, inputs"],
-  ["lg / 18px", "text-lg", "Page titles"],
+  ["2xs / 13px", "text-2xs", "Badges, counters"],
+  ["xs / 14px", "text-xs", "Buttons, nav, labels"],
+  ["sm / 16px", "text-sm", "Body text, inputs"],
+  ["lg / 20px", "text-lg", "Page titles"],
 ];
 
 const radii = [
@@ -74,7 +74,7 @@ export default function DesignSystemView() {
               {neutralSwatches.map(([name, hex]) => (
                 <div key={name}>
                   <div className="h-12 rounded-md border border-border" style={{ background: hex }} />
-                  <p className="text-[10px] text-muted text-center mt-1 font-mono">{name.split("-")[1]}</p>
+                  <p className="text-[12px] text-muted text-center mt-1 font-mono">{name.split("-")[1]}</p>
                 </div>
               ))}
             </div>
@@ -84,7 +84,7 @@ export default function DesignSystemView() {
               {accentSwatches.map(([name, hex]) => (
                 <div key={name}>
                   <div className="h-12 rounded-md" style={{ background: hex }} />
-                  <p className="text-[10px] text-muted text-center mt-1 font-mono">{name}</p>
+                  <p className="text-[12px] text-muted text-center mt-1 font-mono">{name}</p>
                 </div>
               ))}
             </div>
@@ -103,7 +103,7 @@ export default function DesignSystemView() {
           </Section>
 
           {/* Typography */}
-          <Section title="Typography" desc="System font stack. Scale from 10px to 18px for a dense desktop tool.">
+          <Section title="Typography" desc="System font stack. Scale from 13px to 20px for a dense desktop tool.">
             <div className="space-y-1">
               {typeScale.map(([label, cls, use]) => (
                 <div key={label} className="flex items-baseline gap-4 py-2 border-b border-border-subtle last:border-0">
@@ -112,7 +112,7 @@ export default function DesignSystemView() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <span className="text-xs font-mono text-muted">{label}</span>
-                    <span className="text-[10px] text-faint ml-2">{use}</span>
+                    <span className="text-[12px] text-faint ml-2">{use}</span>
                   </div>
                 </div>
               ))}
@@ -159,7 +159,7 @@ export default function DesignSystemView() {
                   <div className="flex items-center justify-center w-16 h-16 rounded-lg bg-surface-2 border border-border">
                     <Box size={size} className="text-accent" />
                   </div>
-                  <span className="text-[10px] font-mono text-muted">{name} . {size}</span>
+                  <span className="text-[12px] font-mono text-muted">{name} . {size}</span>
                 </div>
               ))}
             </div>
@@ -214,7 +214,7 @@ export default function DesignSystemView() {
               {radii.map(([name, val]) => (
                 <div key={name} className="flex flex-col items-center gap-1">
                   <div className="w-16 h-16 bg-accent" style={{ borderRadius: val }} />
-                  <span className="text-[10px] font-mono text-muted">{name} . {val}</span>
+                  <span className="text-[12px] font-mono text-muted">{name} . {val}</span>
                 </div>
               ))}
             </div>
@@ -222,7 +222,7 @@ export default function DesignSystemView() {
               {shadows.map(([name, cls]) => (
                 <div key={name} className="flex flex-col items-center gap-2">
                   <div className={"w-20 h-12 rounded-lg bg-surface border border-border " + cls} />
-                  <span className="text-[10px] font-mono text-muted">{name}</span>
+                  <span className="text-[12px] font-mono text-muted">{name}</span>
                 </div>
               ))}
             </div>
@@ -233,7 +233,7 @@ export default function DesignSystemView() {
             <div className="space-y-2">
               {[4, 8, 12, 16, 24, 32].map((n) => (
                 <div key={n} className="flex items-center gap-3">
-                  <span className="text-[10px] font-mono text-muted w-12 shrink-0">{n}px</span>
+                  <span className="text-[12px] font-mono text-muted w-12 shrink-0">{n}px</span>
                   <div className="h-3 bg-accent rounded-sm" style={{ width: n }} />
                 </div>
               ))}
@@ -262,7 +262,7 @@ function SemanticToken({ label, varName }: { label: string; varName: string }) {
   return (
     <div className="flex items-center gap-2 p-2 rounded-lg bg-surface-2 border border-border">
       <span className="w-5 h-5 rounded shrink-0 border border-border" style={{ background: `rgb(var(${varName}))` }} />
-      <code className="text-[10px] font-mono text-muted truncate">{label}</code>
+      <code className="text-[12px] font-mono text-muted truncate">{label}</code>
     </div>
   );
 }

@@ -213,7 +213,7 @@ export function McpModal({
             ))}
           </select>
           <div className="mt-3">
-            <label className="text-[11px] text-faint mb-1 block" htmlFor="mcp-json">{t("mcp.jsonLabel")}</label>
+            <label className="text-[13px] text-faint mb-1 block" htmlFor="mcp-json">{t("mcp.jsonLabel")}</label>
             <textarea
               id="mcp-json"
               value={serverJson}

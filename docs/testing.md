@@ -43,7 +43,7 @@ import test from "node:test";
 - capability 允许 main window start dragging。
 - App shell 保留主侧栏、workspace toolbar 和 drag region。
 - Skills 左栏、共享 DetailDrawer、token 化网格和窄容器行为不回退。
-- 不重新引入任意 9–11px 字号。
+- 不重新引入任意 11–13px 字号（最小类型档 `--text-2xs` 为 13px）。
 
 修改 `App.tsx`、`SkillsView.tsx`、`DetailDrawer.tsx`、`styles.css`、`tailwind.config.js` 或 Tauri 窗口配置后运行它。若布局行为有意变化，同步更新契约断言，而不是删除检查。
 

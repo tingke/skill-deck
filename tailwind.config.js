@@ -52,7 +52,7 @@ export default {
         base: ["var(--text-base)", { lineHeight: "1.5" }],
         lg:   ["var(--text-lg)", { lineHeight: "1.4" }],
         xl:   ["var(--text-xl)", { lineHeight: "1.35" }],
-        "2xl": ["24px", { lineHeight: "1.25" }],
+        "2xl": ["26px", { lineHeight: "1.25" }],
       },
 
       borderRadius: {

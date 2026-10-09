@@ -37,7 +37,7 @@
 - 危险操作使用显式 pending confirmation 对象和确认对话框，不使用 `confirm()` 或字符串状态模拟。
 - 异步操作要防止重复提交；确认执行中用 `connectionConfirming`、`skillDeleting` 这类 in-flight 标志。
 - 保留布局契约依赖的 `data-testid` 和 `data-tauri-drag-region`。
-- 避免新增任意 9/10/11px 字号；优先使用 `text-2xs`、`text-xs` 等类型 token。
+- 避免新增任意 11/12/13px 字号（最小档 `--text-2xs` 为 13px）；优先使用 `text-2xs`、`text-xs` 等类型 token。
 
 ### 样式
 

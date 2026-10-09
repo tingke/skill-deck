@@ -105,7 +105,7 @@ export default function HooksView() {
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex items-center gap-3 px-6 py-3 border-b border-border bg-surface">
         <h2 className="text-sm font-semibold text-content dark:text-heading">{t("hooks.title")}</h2>
-        <span className="text-[11px] text-faint">{t("hooks.desc")}</span>
+        <span className="text-[13px] text-faint">{t("hooks.desc")}</span>
         <div className="flex items-center gap-2 ml-auto">
           <button onClick={() => setShowAdd(true)} className="btn btn-primary">
             <Plus size={14} /> {t("hooks.add")}
@@ -197,7 +197,7 @@ function HookModal({ existing, t, onClose, onDone }: { existing: ExtensionRow | 
         </div>
         <div className="p-5 space-y-3">
           <div>
-            <label className="text-[11px] text-faint mb-1 block">{t("hooks.runtimeLabel")}</label>
+            <label className="text-[13px] text-faint mb-1 block">{t("hooks.runtimeLabel")}</label>
             <select value={runtime} onChange={(e) => setRuntime(e.target.value)} disabled={isEdit}
               className="w-full px-2.5 py-1.5 text-sm border border-border rounded-lg bg-transparent dark:text-content disabled:opacity-60">
               <option value="claude">Claude Code</option>
@@ -215,7 +215,7 @@ function HookModal({ existing, t, onClose, onDone }: { existing: ExtensionRow | 
           <textarea value={command} onChange={(e) => setCommand(e.target.value)} rows={4} placeholder={t("hooks.commandPlaceholder")}
             className="w-full px-3 py-1.5 text-sm border border-border rounded-lg focus:outline-none focus:border-border-strong bg-transparent dark:text-content font-mono" />
           <div>
-            <label className="text-[11px] text-faint mb-1 block">{t("hooks.timeoutLabel")}</label>
+            <label className="text-[13px] text-faint mb-1 block">{t("hooks.timeoutLabel")}</label>
             <input type="number" value={timeout} onChange={(e) => setTimeoutVal(Number(e.target.value) || 10)}
               className="w-24 px-3 py-1.5 text-sm border border-border rounded-lg focus:outline-none focus:border-border-strong bg-transparent dark:text-content" />
           </div>
