@@ -547,7 +547,9 @@ export const en: Record<TranslationKey, string> = {
   "settings.checkFailed": "Update check failed, please try again later",
   "settings.downloadInstall": "Download & Install",
   "settings.downloading": "Downloading {percent}%",
-  "settings.restartToUpdate": "Restart to finish update",
+  "settings.updateDialogDesc": "The new version will be downloaded and installed. The app restarts automatically when finished.",
+  "settings.updateReady": "Update finished, restarting…",
+  "settings.updateLater": "Later",
   "settings.updateFailed": "Update download failed, please retry",
 
   // Library sources

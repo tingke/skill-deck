@@ -16,7 +16,7 @@ import { useDeleteConfirmation } from "../lib/deleteConfirmation";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
 import {
   Sun, Moon, Monitor, Palette, Database, Info,
-  Power, Download, Upload, CheckCircle2, Globe,
+  Power, Download, Upload, Globe,
   FolderOpen, Loader2, FolderTree, Plus, Trash2, Folder, X,
 } from "lucide-react";
 
@@ -266,7 +266,8 @@ export default function SettingsView() {
   // App info + update
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [update, setUpdate] = useState<api.Update | null>(null);
-  const [updatePhase, setUpdatePhase] = useState<"idle" | "downloading" | "downloaded">("idle");
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const [updatePhase, setUpdatePhase] = useState<"idle" | "downloading" | "restarting">("idle");
   const [progress, setProgress] = useState(0);
   const [checking, setChecking] = useState(false);
   useEffect(() => { api.getAppInfo().then(setAppInfo).catch(() => {}); }, []);
@@ -277,7 +278,11 @@ export default function SettingsView() {
       setUpdate(found);
       setUpdatePhase("idle");
       setProgress(0);
-      if (!found) toast().show(t("settings.upToDate"));
+      if (found) {
+        setUpdateDialogOpen(true);
+      } else {
+        toast().show(t("settings.upToDate"));
+      }
     } catch (error) {
       // 发布源暂无 latest.json（首个带更新清单的版本发布前）时，updater 插件把
       // 404 统一报成 "Could not fetch a valid release JSON from the remote"——
@@ -294,7 +299,7 @@ export default function SettingsView() {
   };
 
   const handleDownloadUpdate = async () => {
-    if (!update) return;
+    if (!update || updatePhase === "downloading" || updatePhase === "restarting") return;
     setUpdatePhase("downloading");
     setProgress(0);
     try {
@@ -310,7 +315,9 @@ export default function SettingsView() {
           setProgress(100);
         }
       });
-      setUpdatePhase("downloaded");
+      // 安装完成后自动重启应用，无需用户再点「重启」
+      setUpdatePhase("restarting");
+      setTimeout(() => { api.relaunchApp().catch(() => {}); }, 800);
     } catch {
       setUpdatePhase("idle");
       toast().show(t("settings.updateFailed"), "error");
@@ -441,23 +448,20 @@ export default function SettingsView() {
             <p className="text-muted leading-relaxed pt-1">
               {t("settings.appDescription")}
             </p>
-            {update && !checking && (
-              <div className="pt-1">
-                <UpdateResult
-                  update={update}
-                  phase={updatePhase}
-                  progress={progress}
-                  t={t}
-                  onDownload={handleDownloadUpdate}
-                  onRestart={() => { api.relaunchApp(); }}
-                />
-              </div>
-            )}
           </div>
         </Section>
 
         </div>
       </div>
+
+      <UpdateDialog
+        open={updateDialogOpen && !!update}
+        update={update}
+        phase={updatePhase}
+        progress={progress}
+        onClose={() => setUpdateDialogOpen(false)}
+        onDownload={handleDownloadUpdate}
+      />
     </div>
   );
 }
@@ -525,36 +529,70 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
-function UpdateResult({
-  update, phase, progress, t, onDownload, onRestart,
+/** 检查到新版本后的更新弹窗：确认下载 → 进度条 → 完成自动重启 */
+function UpdateDialog({
+  open, update, phase, progress, onClose, onDownload,
 }: {
-  update: api.Update;
-  phase: "idle" | "downloading" | "downloaded";
+  open: boolean;
+  update: api.Update | null;
+  phase: "idle" | "downloading" | "restarting";
   progress: number;
-  t: (k: TranslationKey, v?: Record<string, string | number>) => string;
+  onClose: () => void;
   onDownload: () => void;
-  onRestart: () => void;
 }) {
+  const t = useT();
+  if (!open || !update) return null;
+  const busy = phase !== "idle";
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-[13px] text-blue-600 dark:text-blue-400">
-        {t("settings.newVersionAvailable", { version: update.version })}
-      </span>
-      {phase === "downloaded" ? (
-        <button onClick={onRestart} className="btn btn-outline btn-sm">
-          <CheckCircle2 size={13} /> {t("settings.restartToUpdate")}
-        </button>
-      ) : (
-        <button onClick={onDownload} disabled={phase === "downloading"} className="btn btn-outline btn-sm">
-          {phase === "downloading" ? (
-            <>
-              <Loader2 size={13} className="animate-spin" /> {t("settings.downloading", { percent: progress })}
-            </>
+    <div
+      className="connection-dialog-overlay"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) onClose();
+      }}
+    >
+      <div role="dialog" aria-modal="true" data-testid="update-dialog" className="connection-dialog">
+        <div className="connection-dialog-icon">
+          <Download size={18} />
+        </div>
+        <div className="min-w-0">
+          <h3 className="connection-dialog-title">
+            {t("settings.newVersionAvailable", { version: update.version })}
+          </h3>
+
+          {phase === "restarting" ? (
+            <p className="connection-dialog-message flex items-center gap-2">
+              <Loader2 size={13} className="animate-spin" /> {t("settings.updateReady")}
+            </p>
+          ) : phase === "downloading" ? (
+            <div className="space-y-1.5">
+              <p className="connection-dialog-message" style={{ margin: 0 }}>
+                {t("settings.downloading", { percent: progress })}
+              </p>
+              <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-accent transition-all duration-normal"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
           ) : (
-            <>{t("settings.downloadInstall")}</>
+            <p className="connection-dialog-message">{t("settings.updateDialogDesc")}</p>
           )}
-        </button>
-      )}
+
+          <div className="connection-dialog-actions">
+            {!busy && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} autoFocus>
+                {t("settings.updateLater")}
+              </button>
+            )}
+            {phase === "idle" && (
+              <button type="button" className="btn btn-primary btn-sm" onClick={onDownload}>
+                <Download size={13} /> {t("settings.downloadInstall")}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

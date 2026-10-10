@@ -545,7 +545,9 @@ export const zh = {
   "settings.checkFailed": "检查更新失败，请稍后重试",
   "settings.downloadInstall": "下载并安装",
   "settings.downloading": "下载中 {percent}%",
-  "settings.restartToUpdate": "重启应用完成更新",
+  "settings.updateDialogDesc": "将下载并安装新版本，完成后应用会自动重启。",
+  "settings.updateReady": "更新完成，正在重启…",
+  "settings.updateLater": "稍后",
   "settings.updateFailed": "更新下载失败，请重试",
 
   // Library sources
