@@ -2,6 +2,12 @@
 
 本文件记录 SkillDeck 的用户可见变化。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.0.4] - 2026-10-10
+
+### Changed
+
+- 「检查更新」改为弹窗交互：发现新版本时弹出确认弹窗（移除关于区底部的下载文案），下载在弹窗内展示进度条，安装完成后应用自动重启完成更新，无需再手动确认重启。
+
 ## [0.0.3] - 2026-10-09
 
 ### Added
