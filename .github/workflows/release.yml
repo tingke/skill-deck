@@ -151,13 +151,14 @@ jobs:
       - name: Generate updater manifest (latest.json)
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          app_tar=(release-assets/*.app.tar.gz)
-          nsis_exe=(release-assets/*-setup.exe)
-          appimage=(release-assets/*.AppImage)
-          for required in "${app_tar[0]}" "${nsis_exe[0]}" "${appimage[0]}"; do
-            if [[ ! -f "$required" ]]; then
-              echo "Missing updater artifact: $required"
+          # artifacts keep their bundle subdirectories (macos/, nsis/, appimage/...),
+          # so locate updater files recursively instead of flat globs
+          APP_TAR=$(find release-assets -type f -name '*.app.tar.gz' | head -n1)
+          NSIS_EXE=$(find release-assets -type f -name '*-setup.exe' | head -n1)
+          APPIMAGE=$(find release-assets -type f -name '*.AppImage' | head -n1)
+          for required in "$APP_TAR" "$NSIS_EXE" "$APPIMAGE"; do
+            if [[ -z "$required" || ! -f "$required" ]]; then
+              echo "Missing updater artifact (looked for .app.tar.gz / *-setup.exe / .AppImage)"
               exit 1
             fi
           done
@@ -168,12 +169,12 @@ jobs:
           jq -n \
             --arg version "$VERSION" \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg darwin_url "$BASE/$(basename "${app_tar[0]}")" \
-            --arg darwin_sig "$(cat "${app_tar[0]}.sig")" \
-            --arg win_url "$BASE/$(basename "${nsis_exe[0]}")" \
-            --arg win_sig "$(cat "${nsis_exe[0]}.sig")" \
-            --arg linux_url "$BASE/$(basename "${appimage[0]}")" \
-            --arg linux_sig "$(cat "${appimage[0]}.sig")" \
+            --arg darwin_url "$BASE/$(basename "$APP_TAR")" \
+            --arg darwin_sig "$(cat "$APP_TAR.sig")" \
+            --arg win_url "$BASE/$(basename "$NSIS_EXE")" \
+            --arg win_sig "$(cat "$NSIS_EXE.sig")" \
+            --arg linux_url "$BASE/$(basename "$APPIMAGE")" \
+            --arg linux_sig "$(cat "$APPIMAGE.sig")" \
             '{
               version: $version,
               notes: ("SkillDeck v" + $version),
