@@ -542,6 +542,7 @@ export const zh = {
   "settings.checkUpdate": "检查更新",
   "settings.upToDate": "已是最新版本",
   "settings.newVersionAvailable": "发现新版本 {version}",
+  "settings.updateToVersion": "更新到 v{version}",
   "settings.checkFailed": "检查更新失败，请稍后重试",
   "settings.downloadInstall": "下载并安装",
   "settings.downloading": "下载中 {percent}%",

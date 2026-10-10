@@ -436,10 +436,22 @@ export default function SettingsView() {
           title={t("settings.about")}
           className="settings-grid__wide"
           action={
-            <button onClick={handleCheckUpdate} disabled={checking} className="btn btn-outline btn-sm">
-              {checking ? <Loader2 size={13} className="animate-spin" /> : <Globe size={13} />}
-              {t("settings.checkUpdate")}
-            </button>
+            // 互斥显示：有可用更新时右上角固定为「更新到 vX.Y.Z」入口，
+            // 否则是「检查更新」；更新动作统一走弹窗（进度 + 自动重启）
+            update && !checking ? (
+              <button
+                onClick={() => setUpdateDialogOpen(true)}
+                className="btn btn-primary btn-sm"
+                title={t("settings.newVersionAvailable", { version: update.version })}
+              >
+                <Download size={13} /> {t("settings.updateToVersion", { version: update.version })}
+              </button>
+            ) : (
+              <button onClick={handleCheckUpdate} disabled={checking} className="btn btn-outline btn-sm">
+                {checking ? <Loader2 size={13} className="animate-spin" /> : <Globe size={13} />}
+                {t("settings.checkUpdate")}
+              </button>
+            )
           }
         >
           <div className="space-y-2.5 text-xs">

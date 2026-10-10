@@ -544,6 +544,7 @@ export const en: Record<TranslationKey, string> = {
   "settings.checkUpdate": "Check for Updates",
   "settings.upToDate": "You're up to date",
   "settings.newVersionAvailable": "New version {version} available",
+  "settings.updateToVersion": "Update to v{version}",
   "settings.checkFailed": "Update check failed, please try again later",
   "settings.downloadInstall": "Download & Install",
   "settings.downloading": "Downloading {percent}%",
