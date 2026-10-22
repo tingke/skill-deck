@@ -24,6 +24,7 @@ import {
   Trash2,
   X,
   Search,
+  ChevronRight,
   Play,
   Download,
   Edit3,
@@ -51,6 +52,9 @@ import { useDeleteConfirmation } from "../lib/deleteConfirmation";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
 import DetailDrawer from "../components/DetailDrawer";
 import { AgentGlyph } from "../components/AgentGlyph";
+import PageHeader, { ContentTitle } from "../components/PageHeader";
+import SearchInput from "../components/SearchInput";
+import ViewToggle from "../components/ViewToggle";
 
 const toast = () => useToastStore.getState();
 
@@ -61,6 +65,7 @@ export default function PackagesView() {
   const rules = useAssetsStore((s) => s.rules);
   const extensions = useExtensionsStore((s) => s.extensions);
   const [query, setQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -156,40 +161,48 @@ export default function PackagesView() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-     <div className="flex items-center gap-3 px-6 py-3 border-b border-border bg-surface">
-       <div className="relative flex-1 max-w-md">
-          <Search size={14} className="absolute left-3 top-2.5 text-faint" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("packages.search")}
-            className="w-full pl-9 pr-3 py-1.5 text-sm border border-border rounded-lg focus:outline-none focus:border-border-strong bg-transparent dark:text-content"
-          />
-        </div>
-        <div className="flex items-center gap-2 ml-auto">
-          <button
-            onClick={() => setCreating(true)}
-            className="btn btn-primary"
-          >
+      <PageHeader
+        toolbar={
+          <>
+            <ViewToggle mode={viewMode} onChange={setViewMode} />
+            <SearchInput value={query} onChange={setQuery} placeholder={t("packages.search")} />
+          </>
+        }
+        actions={
+          <button onClick={() => setCreating(true)} className="btn btn-primary">
             <Plus size={14} /> {t("packages.new")}
           </button>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="flex-1 overflow-y-auto bg-page p-6">
-        <div className="mb-4 text-xs text-muted">
-          {t("packages.desc")}
-          <code className="mx-1 px-1 bg-surface-2 rounded">.ai-package.zip</code>
-        </div>
-
+      <div className="flex-1 overflow-y-auto">
+        <ContentTitle
+          title={t("nav.presets")}
+          meta={t("packages.desc") + " · .ai-package.zip"}
+        />
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-faint">
             <PackageIcon size={48} />
             <p className="text-sm mt-3">{t("packages.empty")}</p>
             <p className="text-xs mt-1">{t("packages.emptyHint")}</p>
           </div>
+        ) : viewMode === "list" ? (
+          <div className="list-panel mx-6 mb-6">
+            {filtered.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setDetailId(p.id)}
+                className="list-row list-row--generic"
+              >
+                <span className="list-row__name">{p.name}</span>
+                <span className="list-row__desc">{p.description}</span>
+                <span className="text-2xs text-faint shrink-0 tnum">{p.skill_count} 技能</span>
+                <ChevronRight size={14} className="list-row__chev" />
+              </button>
+            ))}
+          </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="px-6 pb-6 card-grid">
             {filtered.map((p) => (
               <PackageCard
                 key={p.id}
@@ -412,11 +425,21 @@ function PackageDetailDrawer({
       actions={
         pkg && (
           <>
-            <button onClick={onEdit} className="btn btn-primary ml-auto">
-              <Edit3 size={14} /> {t("common.edit")}
+            <button
+              onClick={onEdit}
+              className="btn-icon rounded-full bg-surface-2"
+              title={t("common.edit")}
+              aria-label={t("common.edit")}
+            >
+              <Edit3 size={14} />
             </button>
-            <button onClick={onDelete} className="btn btn-ghost text-red-500">
-              <Trash2 size={14} /> {t("common.delete")}
+            <button
+              onClick={onDelete}
+              className="btn-icon rounded-full bg-surface-2 text-red-500 hover:text-red-600"
+              title={t("common.delete")}
+              aria-label={t("common.delete")}
+            >
+              <Trash2 size={14} />
             </button>
           </>
         )

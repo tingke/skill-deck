@@ -18,6 +18,11 @@ import type { ProjectPackageDrift, ProjectRow } from "../types";
 import type { TranslationKey } from "../i18n";
 import { useDeleteConfirmation } from "../lib/deleteConfirmation";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
+import PageHeader from "../components/PageHeader";
+import RowMenu from "../components/RowMenu";
+import ViewToggle from "../components/ViewToggle";
+import SearchInput from "../components/SearchInput";
+import { ContentTitle } from "../components/PageHeader";
 
 const toast = () => useToastStore.getState();
 
@@ -61,9 +66,19 @@ export default function ProjectsView() {
   const agentActivity = useActivityStore((s) => s.agentActivity);
   const loadAgentActivity = useActivityStore((s) => s.loadAgentActivity);
   const [editing, setEditing] = useState<ProjectRow | null>(null);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [query, setQuery] = useState("");
   const [presetProjectId, setPresetProjectId] = useState<string | null>(null);
   const [drifts, setDrifts] = useState<ProjectPackageDrift[]>([]);
   const deleteConfirmation = useDeleteConfirmation();
+
+  const filteredProjects = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter(
+      (p) => p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q),
+    );
+  }, [projects, query]);
 
   const activeProjectId = useMemo(() => {
     const normalize = normalizeProjectPath;
@@ -146,30 +161,93 @@ export default function ProjectsView() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-surface">
-        <div className="text-xs text-faint">
-          {t("projects.desc")}
-        </div>
-        <div className="flex items-center gap-2 shrink-0 ml-3">
+      <PageHeader
+        toolbar={
+          <>
+            <ViewToggle mode={viewMode} onChange={setViewMode} />
+            <SearchInput value={query} onChange={setQuery} placeholder={t("projects.search")} />
+          </>
+        }
+        actions={
           <button
             onClick={handleAdd}
             className="btn btn-primary"
           >
             <Plus size={14} /> {t("projects.add")}
           </button>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="flex-1 overflow-y-auto bg-page p-6">
+      <div className="flex-1 overflow-y-auto">
+        <ContentTitle title={t("projects.title")} meta={t("projects.desc")} />
         {projects.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-faint">
             <FolderKanban size={48} />
             <p className="text-sm mt-3">{t("projects.empty")}</p>
             <p className="text-xs mt-1">{t("projects.emptyHint")}</p>
           </div>
+        ) : viewMode === "list" ? (
+          <div className="list-panel mx-6 mb-6">
+            {filteredProjects.map((p) => {
+              const c = colorOf(p.color);
+              const drift = drifts.find((item) => item.project_id === p.id);
+              return (
+                <div key={p.id} className="list-row">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${c.dot}`} />
+                    <span className="list-row__name">{p.name}</span>
+                    {activeProjectId === p.id && (
+                      <span className="text-2xs text-emerald-600 dark:text-emerald-400 shrink-0">{t("projects.active")}</span>
+                    )}
+                  </span>
+                  <span className="list-row__desc font-mono">{p.path}</span>
+                  {drift && (
+                    <span className="text-2xs text-faint shrink-0 tnum">
+                      {t(
+                        drift.status === "up_to_date"
+                          ? "projects.driftUpToDate"
+                          : drift.status === "invalid"
+                            ? "projects.driftInvalid"
+                            : drift.status === "missing"
+                              ? "projects.driftMissing"
+                              : "projects.driftChanged",
+                        {
+                          skills: drift.skills_missing + drift.skills_extra,
+                          mcps: drift.mcps_added + drift.mcps_removed + drift.mcps_changed,
+                          configs: drift.configs_added + drift.configs_removed + drift.configs_changed,
+                        },
+                      )}
+                    </span>
+                  )}
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <button
+                      onClick={() => handleAddToPreset(p)}
+                      disabled={presetProjectId === p.id}
+                      title={t("projects.syncPreset")}
+                      className="btn-icon"
+                    >
+                      {drift?.has_changes ? <RefreshCw size={14} /> : <PackagePlus size={14} />}
+                    </button>
+                    <RowMenu
+                      ariaLabel={t("common.more")}
+                      items={[
+                        { label: t("common.edit"), icon: <Edit3 size={13} />, onSelect: () => setEditing(p) },
+                        {
+                          label: t("common.delete"),
+                          icon: <Trash2 size={13} />,
+                          danger: true,
+                          onSelect: () => deleteConfirmation.request(p.name, () => handleDelete(p.id)),
+                        },
+                      ]}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3">
-            {projects.map((p) => {
+          <div className="px-6 pb-6 card-grid">
+            {filteredProjects.map((p) => {
               const c = colorOf(p.color);
               const projectSkills = skills.filter((s) => s.id.startsWith(`project:${p.id}:`));
               const drift = drifts.find((item) => item.project_id === p.id);
@@ -200,16 +278,18 @@ export default function ProjectsView() {
                       >
                         {drift?.has_changes ? <RefreshCw size={14} /> : <PackagePlus size={14} />}
                       </button>
-                      <button onClick={() => setEditing(p)} title={t("common.edit")} className="btn-icon">
-                        <Edit3 size={14} />
-                      </button>
-                      <button
-                        onClick={() => deleteConfirmation.request(p.name, () => handleDelete(p.id))}
-                        title={t("common.delete")}
-                        className="btn-icon btn-icon-danger"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      <RowMenu
+                        ariaLabel={t("common.more")}
+                        items={[
+                          { label: t("common.edit"), icon: <Edit3 size={13} />, onSelect: () => setEditing(p) },
+                          {
+                            label: t("common.delete"),
+                            icon: <Trash2 size={13} />,
+                            danger: true,
+                            onSelect: () => deleteConfirmation.request(p.name, () => handleDelete(p.id)),
+                          },
+                        ]}
+                      />
                     </div>
                   </div>
 

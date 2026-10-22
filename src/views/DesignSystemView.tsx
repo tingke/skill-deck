@@ -4,6 +4,9 @@ import {
   RefreshCw, Download, FolderOpen, FileOutput, X, Settings,
   Box, Cpu, BookOpen, Server,
 } from "lucide-react";
+import PageHeader from "../components/PageHeader";
+import RowMenu from "../components/RowMenu";
+import { ToggleSwitch } from "../components/ExtList";
 
 /* ============================================================
    Design System Reference — living style guide
@@ -239,6 +242,70 @@ export default function DesignSystemView() {
               ))}
             </div>
          </Section>
+
+          {/* Unified Page Patterns */}
+          <Section title="Unified Page Patterns" desc="Every page composes from: PageHeader → toolbar row → content zones. The primary action lives in the header, max one.">
+            <div className="space-y-6">
+              <div>
+                <p className="text-[12px] font-mono text-muted mb-2">PageHeader — title + subtitle + max 1 primary</p>
+                <div className="rounded-lg border border-border overflow-hidden">
+                  <PageHeader
+                    title="技能"
+                    subtitle="103 个技能 · 187 处接线 · 24 个未体检"
+                    actions={<button className="btn btn-primary"><Plus size={14} /> 安装</button>}
+                  />
+                </div>
+              </div>
+              <div>
+                <p className="text-[12px] font-mono text-muted mb-2">EmptyState — icon + title + why-empty + primary action</p>
+                <div className="rounded-lg border border-border bg-page">
+                  <div className="empty-state py-10">
+                    <div className="empty-state__icon"><Box size={22} strokeWidth={1.5} /></div>
+                    <p className="empty-state__title">没有规则</p>
+                    <p className="empty-state__hint">规则是长期生效的约束文件，登记后可随预设应用到 Agent。</p>
+                    <button className="btn btn-primary mt-4"><Plus size={14} /> 新建规则</button>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-start gap-8 flex-wrap">
+                <div>
+                  <p className="text-[12px] font-mono text-muted mb-2">RowMenu — red only lives here</p>
+                  <RowMenu ariaLabel="更多" items={[{ label: "编辑", icon: <Edit3 size={13} />, onSelect: () => {} }, { label: "删除", icon: <Trash2 size={13} />, danger: true, onSelect: () => {} }]} />
+                </div>
+                <div>
+                  <p className="text-[12px] font-mono text-muted mb-2">ToggleSwitch — checked = accent violet</p>
+                  <div className="flex items-center gap-3 pt-1">
+                    <ToggleSwitch checked={true} onChange={() => {}} />
+                    <ToggleSwitch checked={false} onChange={() => {}} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Section>
+
+          {/* Semantic color lock */}
+          <Section title="Semantic Color Lock" desc="Green = safe/enabled · Yellow = caution · Red = danger/error · Gray = unconfigured/zero · Violet = accent/selected. Toggles are accent violet; green is reserved for audit-safe.">
+            <div className="flex gap-3 flex-wrap">
+              {[ ["#34C759", "安全 / 已启用"], ["#FF9F0A", "需留意"], ["#FF3B30", "危险 / 错误"], ["#8E8E93", "未配置 / 零值"], ["#6E56CF", "强调 / 选中"] ].map(([hex, label]) => (
+                <div key={label} className="flex items-center gap-2 p-2 rounded-lg bg-surface-2 border border-border">
+                  <span className="w-4 h-4 rounded-full shrink-0" style={{ background: hex }} />
+                  <span className="text-[12px] text-muted">{label}</span>
+                </div>
+              ))}
+            </div>
+          </Section>
+
+          {/* Terminology */}
+          <Section title="Terminology" desc="Page titles, column names, and badges are Chinese-first. Enabling ≠ wiring.">
+            <div className="grid grid-cols-2 gap-2">
+              {[ ["Skill", "技能"], ["MCP", "工具（MCP）"], ["Hook", "钩子"], ["Agent", "智能体"], ["Connect / wiring", "接线"], ["Enable", "启用"], ["Audit", "安全体检"], ["Preset", "预设"] ].map(([en, zhT]) => (
+                <div key={en} className="flex items-center gap-2 p-2 rounded-lg bg-surface-2 border border-border">
+                  <code className="text-[12px] font-mono text-muted">{en}</code>
+                  <span className="text-[12px] text-content">→ {zhT}</span>
+                </div>
+              ))}
+            </div>
+          </Section>
 
         </div>
         </div>

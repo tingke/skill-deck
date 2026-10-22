@@ -2,7 +2,11 @@ import { useState } from "react";
 import { useAssetsStore } from "../stores/assets";
 import { useActivityStore } from "../stores/activity";
 import { saveRule, deleteRule, applyRule } from "../lib/tauri";
-import { Plus, Trash2, X, Search, ScrollText, Copy, Check, FileOutput, Edit3 } from "lucide-react";
+import { Plus, Trash2, X, Search, ScrollText, Copy, Check, FileOutput, Edit3, ChevronRight } from "lucide-react";
+import RowMenu from "../components/RowMenu";
+import SearchInput from "../components/SearchInput";
+import ViewToggle from "../components/ViewToggle";
+import PageHeader, { ContentTitle } from "../components/PageHeader";
 import type { Rule } from "../types";
 import { PathButton } from "../components/ExtList";
 import { useToastStore } from "../stores/toast";
@@ -16,6 +20,7 @@ export default function RulesView() {
   const t = useT();
   const { rules, loadRules } = useAssetsStore();
   const [query, setQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [editing, setEditing] = useState<Rule | null>(null);
   const deleteConfirmation = useDeleteConfirmation();
 
@@ -41,34 +46,72 @@ export default function RulesView() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-     <div className="flex items-center gap-3 px-6 py-3 border-b border-border bg-surface">
-       <div className="relative flex-1 max-w-md">
-          <Search size={14} className="absolute left-3 top-2.5 text-faint" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("rules.search")}
-            className="w-full pl-9 pr-3 py-1.5 text-sm border border-border rounded-lg focus:outline-none focus:border-border-strong"
-          />
-        </div>
-       <div className="flex items-center gap-2 ml-auto">
-         <button
-           onClick={() => setEditing({ id: 0, title: "", content: "", platform: "claude", target_path: null, tags: [], source: "manual" })}
-           className="btn btn-primary"
-         >
-           <Plus size={14} /> {t("rules.newTitle")}
-         </button>
-       </div>
-      </div>
+      <PageHeader
+        toolbar={
+          <>
+            <ViewToggle mode={viewMode} onChange={setViewMode} />
+            <SearchInput value={query} onChange={setQuery} placeholder={t("rules.search")} />
+          </>
+        }
+        actions={
+          <button
+            onClick={() => setEditing({ id: 0, title: "", content: "", platform: "claude", target_path: null, tags: [], source: "manual" })}
+            className="btn btn-primary"
+          >
+            <Plus size={14} /> {t("rules.newTitle")}
+          </button>
+        }
+      />
 
-      <div className="flex-1 overflow-y-auto bg-page">
+      <div className="flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-faint">
-           <ScrollText size={40} />
-           <p className="text-sm mt-2">{t("rules.empty")}</p>
-         </div>
+          rules.length === 0 ? (
+            <div className="empty-state h-full">
+              <div className="empty-state__icon">
+                <ScrollText size={22} strokeWidth={1.5} />
+              </div>
+              <p className="empty-state__title">{t("rules.empty")}</p>
+              <p className="empty-state__hint">{t("rules.emptyDesc")}</p>
+              <div className="flex items-center gap-2 mt-4">
+                <button
+                  onClick={() => setEditing({ id: 0, title: "", content: "", platform: "claude", target_path: null, tags: [], source: "manual" })}
+                  className="btn btn-primary"
+                >
+                  <Plus size={14} /> {t("rules.newTitle")}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="empty-state h-full">
+              <div className="empty-state__icon">
+                <Search size={22} strokeWidth={1.5} />
+              </div>
+              <p className="empty-state__title">{t("rules.noMatch")}</p>
+              <p className="empty-state__hint">{t("rules.noMatchHint")}</p>
+            </div>
+          )
         ) : (
-          <div className="p-4 grid grid-cols-2 gap-3">
+          <>
+          <ContentTitle title={t("rules.title")} meta={t("rules.subtitle")} />
+          {viewMode === "list" ? (
+            <div className="list-panel mx-6 mb-6">
+              {filtered.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => setEditing(r)}
+                  className="list-row list-row--generic"
+                >
+                  <span className="list-row__name">{r.title}</span>
+                  <span className="list-row__desc font-mono">{r.content}</span>
+                  <span className={"badge shrink-0 " + (r.platform === "codex" ? "bg-green-50 text-green-600" : "bg-orange-50 text-orange-600")}>
+                    {r.platform === "codex" ? t("rules.platformCodex") : t("rules.platformClaude")}
+                  </span>
+                  <ChevronRight size={14} className="list-row__chev" />
+                </button>
+              ))}
+            </div>
+          ) : (
+          <div className="px-6 pb-6 card-grid">
             {filtered.map((r) => (
               <div key={r.id} className="card p-4">
                 <div className="flex items-start justify-between">
@@ -85,29 +128,30 @@ export default function RulesView() {
                    <button
                      onClick={() => handleApply(r.id)}
                      title={t("rules.writeTooltip")}
-                     className="text-faint hover:text-content dark:hover:text-content p-1"
+                     className="btn-icon"
                    >
                      <FileOutput size={14} />
                    </button>
-                   <button
-                     onClick={() => setEditing(r)}
-                     title={t("common.edit")}
-                     className="text-faint hover:text-content dark:hover:text-content p-1"
-                   >
-                     <Edit3 size={14} />
-                   </button>
-                   <button
-                     onClick={() => deleteConfirmation.request(r.title, () => handleDelete(r.id))}
-                     className="text-red-500 hover:text-red-600 p-1"
-                   >
-                     <Trash2 size={14} />
-                   </button>
+                   <RowMenu
+                     ariaLabel={t("common.more")}
+                     items={[
+                       { label: t("common.edit"), icon: <Edit3 size={13} />, onSelect: () => setEditing(r) },
+                       {
+                         label: t("common.delete"),
+                         icon: <Trash2 size={13} />,
+                         danger: true,
+                         onSelect: () => deleteConfirmation.request(r.title, () => handleDelete(r.id)),
+                       },
+                     ]}
+                   />
                  </div>
                 </div>
                 <p className="text-xs text-faint mt-1.5 line-clamp-3 font-mono">{r.content}</p>
               </div>
             ))}
           </div>
+          )}
+          </>
         )}
       </div>
 

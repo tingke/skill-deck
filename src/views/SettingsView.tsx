@@ -14,6 +14,8 @@ import { formatSkillPath } from "../lib/skillPaths";
 import type { AppInfo } from "../types";
 import { useDeleteConfirmation } from "../lib/deleteConfirmation";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
+import RowMenu from "../components/RowMenu";
+import PageHeader from "../components/PageHeader";
 import {
   Sun, Moon, Monitor, Palette, Database, Info,
   Power, Download, Upload, Globe,
@@ -57,13 +59,17 @@ function LibrarySourceRow({
         <span className={"absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform " +
           (lib.enabled ? "translate-x-4" : "")} />
       </button>
-      <button
-        onClick={onDelete}
-        className="text-red-500 hover:text-red-600 shrink-0 p-1"
-        title={t("common.delete")}
-      >
-        <Trash2 size={14} />
-      </button>
+      <RowMenu
+        ariaLabel={t("common.more")}
+        items={[
+          {
+            label: t("common.delete"),
+            icon: <Trash2 size={13} />,
+            danger: true,
+            onSelect: onDelete,
+          },
+        ]}
+      />
     </div>
   );
 }
@@ -363,9 +369,9 @@ export default function SettingsView() {
   ];
 
   return (
-    <div className="settings-view bg-page">
+    <div className="settings-view">
       <div className="settings-view__inner mx-auto w-full max-w-5xl px-6 py-6">
-        <h2 className="text-lg font-bold mb-5">{t("settings.title")}</h2>
+        <PageHeader title={t("settings.title")} />
 
         <div className="settings-grid">
         {/* General */}

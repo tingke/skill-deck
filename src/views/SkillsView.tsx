@@ -8,7 +8,7 @@ import {
   Tag as TagIcon, CheckSquare, Layers, Square,
   Power, FileText, Link2, Clock, ShieldCheck,
   FolderOpen, FolderClosed, ChevronRight, ChevronDown,
-  FilePen, Cpu, Globe, User, Scale, ChevronUp,
+  FilePen, Cpu, Globe, User, Scale, Settings as SettingsIcon,
   ExternalLink, Loader2, Plus,
   ArchiveRestore,
   Download, TriangleAlert, OctagonX, RefreshCw, ArrowUp, GitBranch,
@@ -21,6 +21,8 @@ import { auditVerdictMeta, scoreGradeMeta, INSTALL_STATUS_META, needsUserConfirm
 import { buildBatchSharedDisconnectConfirmation } from "../lib/connectionConfirmation";
 import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
+import { ContentTitle } from "../components/PageHeader";
+import ViewToggle from "../components/ViewToggle";
 import { AgentGlyph } from "../components/AgentGlyph";
 import AuditFindings from "../components/AuditFindings";
 import InstallSkillDialog from "../components/InstallSkillDialog";
@@ -45,64 +47,20 @@ function MiniToggle({ checked, onChange }: { checked: boolean; onChange: () => v
   );
 }
 
-// ---- Rail item ----
-function RailItem({
-  label, count, active, onClick,
-}: {
-  label: string; count: number; active: boolean; onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={
-        "rail-item " + (active ? "rail-item--active" : "")
-      }
-    >
-      <span className="truncate">{label}</span>
-      <span className={"rail-item-count " + (active ? "text-accent" : "")}>{count}</span>
-    </button>
-  );
-}
-
-// ---- Agent icon in table ----
-function AgentIcon({ agent, linked }: { agent: AgentInfo; linked: boolean }) {
-  return (
-    <AgentGlyph
-      id={agent.id}
-      label={`${agent.label}${linked ? " · 已连接" : " · 未连接"}`}
-      size={20}
-      active={linked}
-    />
-  );
-}
-
-// ---- Permission badges ----
-function PermissionBadges({ perms }: { perms: string[] }) {
-  if (perms.length === 0) return <ShieldCheck size={13} className="inline text-faint opacity-40" />;
-  return (
-    <div className="flex items-center gap-0.5 justify-center">
-      {perms.map((p) => {
-        const cfg = PERM_ICONS[p];
-        if (!cfg) return null;
-        const Icon = cfg.icon;
-        return <span key={p} title={cfg.label}><Icon size={11} className={cfg.color} /></span>;
-      })}
-    </div>
-  );
-}
-
-// ---- Audit verdict icon in table ----
-function AuditVerdictIcon({ verdict }: { verdict?: string | null }) {
+// ---- Audit verdict badge in table (dot + word, V6) ----
+function AuditBadge({ verdict }: { verdict?: string | null }) {
+  const t = useT();
+  const dot = (color: string) => <span className="inline-block w-[7px] h-[7px] rounded-full shrink-0" style={{ background: color }} />;
   if (verdict === "pass") {
-    return <span title="安全审查通过"><ShieldCheck size={13} className="inline text-emerald-500" /></span>;
+    return <span title={t("safety.statPass")} className="inline-flex items-center gap-1.5">{dot("rgb(var(--c-success))")}<span className="text-2xs" style={{ color: "rgb(var(--c-success))" }}>{t("safety.statPass")}</span></span>;
   }
   if (verdict === "warn") {
-    return <span title="安全体检：需留意"><TriangleAlert size={13} className="inline text-amber-500" /></span>;
+    return <span title={t("safety.statWarn")} className="inline-flex items-center gap-1.5">{dot("rgb(var(--c-warning))")}<span className="text-2xs" style={{ color: "rgb(var(--c-warning))" }}>{t("safety.statWarn")}</span></span>;
   }
   if (verdict === "block") {
-    return <span title="安全体检：危险"><OctagonX size={13} className="inline text-red-500" /></span>;
+    return <span title={t("safety.statBlock")} className="inline-flex items-center gap-1.5">{dot("rgb(var(--c-danger))")}<span className="text-2xs" style={{ color: "rgb(var(--c-danger))" }}>{t("safety.statBlock")}</span></span>;
   }
-  return <span title="未检查"><Clock size={13} className="inline text-faint opacity-40" /></span>;
+  return <span title={t("safety.statPending")} className="inline-flex items-center gap-1.5"><span className="inline-block w-[7px] h-[7px] rounded-full shrink-0" style={{ background: "rgb(var(--c-faint))" }} /><span className="text-2xs text-faint">{t("safety.statPending")}</span></span>;
 }
 
 // ---- Table row ----
@@ -117,50 +75,86 @@ function SkillTableRow({
     <div
       onClick={multiSelect ? onToggleCheck : onSelect}
       className={
-        "skills-table-grid relative grid items-center gap-2 px-4 py-2 border-b border-border-subtle cursor-pointer transition-colors " +
-        (selected ? "row-selected" : "hover:bg-surface-hover") +
+        "list-row list-row--skill relative " +
+        (selected ? "list-row--selected" : "") +
         (!skill.enabled ? " opacity-50" : "")
       }
     >
-      {selected && <div className="row-selected-bar" />}
       {multiSelect && (
         <div className="absolute left-1 top-1/2 -translate-y-1/2 pointer-events-none">
           {checked ? <CheckSquare size={15} className="text-accent" /> : <Square size={15} className="text-faint" />}
         </div>
       )}
-      <div className={"flex flex-col justify-center gap-1 min-w-0 " + (multiSelect ? "pl-5" : "")}>
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="min-w-0 truncate text-sm font-semibold text-heading">{skill.name}</span>
-          {!skill.enabled && <Power size={11} className="text-faint shrink-0" />}
-        </div>
-        {skill.tags.length > 0 && (
-          <div
-            className="flex items-center gap-1 flex-wrap min-w-0"
-            title={skill.tags.join(", ")}
-          >
-            {skill.tags.slice(0, 3).map((tag) => (
-              <span
-                key={tag}
-                className="text-2xs max-w-[100px] truncate px-1.5 py-0.5 rounded bg-surface-2 text-muted font-medium"
-              >
-                {tag}
-              </span>
-            ))}
-            {skill.tags.length > 3 && (
-              <span className="text-2xs text-faint font-medium">+{skill.tags.length - 3}</span>
-            )}
-          </div>
-        )}
-      </div>
-      <div className="flex items-center justify-center gap-0.5">
+      <span className={"list-row__name min-w-0 " + (multiSelect ? "pl-5" : "")}>
+        {skill.name}
+        {!skill.enabled && <Power size={11} className="inline text-faint ml-1" />}
+      </span>
+      <span className="list-row__desc min-w-0">
+        {skill.description || (skill.tags.length > 0 ? skill.tags.join(" · ") : "")}
+      </span>
+      <span className="list-row__dots">
         {agentOptions.map((agent) => (
-          <AgentIcon key={agent.id} agent={agent} linked={skill.links.includes(agent.id)} />
+          <AgentGlyph
+            key={agent.id}
+            id={agent.id}
+            label={agent.label}
+            size={16}
+            active={skill.links.includes(agent.id)}
+          />
         ))}
+      </span>
+      <AuditBadge verdict={skill.audit_verdict} />
+      <ChevronRight size={14} className="list-row__chev" />
+    </div>
+  );
+}
+
+// ---- Grid card (V6 集合页网格) ----
+function SkillCard({
+  skill, agentOptions, selected, multiSelect, checked, onSelect, onToggleCheck,
+}: {
+  skill: Skill; agentOptions: AgentInfo[]; selected: boolean;
+  multiSelect: boolean; checked: boolean;
+  onSelect: () => void; onToggleCheck: () => void;
+}) {
+  const t = useT();
+  return (
+    <div
+      onClick={multiSelect ? onToggleCheck : onSelect}
+      className={
+        "card relative p-3.5 flex flex-col gap-2 cursor-pointer transition-colors " +
+        (selected ? "card-selected" : "card-hover") +
+        (!skill.enabled ? " opacity-50" : "")
+      }
+    >
+      {multiSelect && (
+        <div className="absolute left-2 top-2 pointer-events-none">
+          {checked ? <CheckSquare size={15} className="text-accent" /> : <Square size={15} className="text-faint" />}
+        </div>
+      )}
+      <div className="flex items-center gap-1.5 min-w-0">
+        <span className="min-w-0 truncate text-[12.5px] font-semibold text-heading">{skill.name}</span>
+        {!skill.enabled && <Power size={11} className="text-faint shrink-0" />}
+        <span className="ml-auto shrink-0"><AuditBadge verdict={skill.audit_verdict} /></span>
       </div>
-      <div className="text-center"><PermissionBadges perms={skill.permissions} /></div>
-      <div className="text-center"><AuditVerdictIcon verdict={skill.audit_verdict} /></div>
-      <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
-        <MiniToggle checked={skill.enabled} onChange={() => useSkillsStore.getState().toggleSkillEnabled(skill.id, !skill.enabled)} />
+      {skill.description && (
+        <p className="text-2xs leading-relaxed text-muted line-clamp-2 min-h-[28px]">{skill.description}</p>
+      )}
+      <div className="flex items-center gap-1 mt-auto pt-0.5">
+        {agentOptions.map((agent) => (
+          <AgentGlyph
+            key={agent.id}
+            id={agent.id}
+            label={agent.label}
+            size={16}
+            active={skill.links.includes(agent.id)}
+          />
+        ))}
+        {skill.tags.length > 0 && (
+          <span className="ml-auto text-2xs text-faint truncate max-w-[100px]" title={skill.tags.join(", ")}>
+            {skill.tags[0]}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -197,13 +191,13 @@ function TagEditor({ skillId, tags }: { skillId: string; tags: string[] }) {
             if (e.key === "Escape") { setText(""); setAdding(false); }
           }}
           placeholder="新标签"
-          className="px-2 py-1 text-xs border border-border-strong rounded-md focus:outline-none focus:border-accent flex-1 min-w-[140px]"
+          className="input flex-1 min-w-[140px]"
           autoFocus
         />
         <button onClick={addTag} className="p-1 text-emerald-500 hover:text-emerald-700"><Check size={14} /></button>
         <button
           onClick={() => { setText(""); setAdding(false); }}
-          className="p-1 text-faint hover:text-content"
+          className="btn-icon btn-icon-sm"
         >
           <X size={14} />
         </button>
@@ -243,129 +237,56 @@ function TagEditor({ skillId, tags }: { skillId: string; tags: string[] }) {
 }
 
 // ---- Inline file tree with content disclosure ----
-function FileTree({ skillId, entries }: { skillId: string; entries: SkillFileEntry[] }) {
-  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
-  const [fileContents, setFileContents] = useState<Map<string, string>>(new Map());
-  const [loadingFiles, setLoadingFiles] = useState<Set<string>>(new Set());
-
-  const toggleFile = useCallback(async (filePath: string) => {
-    setExpandedFiles((prev) => {
-      const next = new Set(prev);
-      if (next.has(filePath)) next.delete(filePath);
-      else next.add(filePath);
-      return next;
-    });
-    // load on first expand
-    if (!fileContents.has(filePath) && !loadingFiles.has(filePath)) {
-      setLoadingFiles((prev) => new Set(prev).add(filePath));
-      try {
-        const content = await readSkillFileByPath(skillId, filePath);
-        setFileContents((prev) => new Map(prev).set(filePath, content));
-      } catch {
-        setFileContents((prev) => new Map(prev).set(filePath, "（无法读取文件）"));
-      } finally {
-        setLoadingFiles((prev) => { const n = new Set(prev); n.delete(filePath); return n; });
-      }
-    }
-  }, [skillId, fileContents, loadingFiles]);
-
-  const renderNode = (entry: SkillFileEntry, depth: number): React.ReactNode => {
-    const paddingLeft = `${depth * 14 + 6}px`;
-
-    if (entry.is_dir) {
-      return <DirNode key={entry.path} entry={entry} depth={depth} renderChildren={renderNode} />;
-    }
-
-    const isExpanded = expandedFiles.has(entry.path);
-    const isLoading = loadingFiles.has(entry.path);
-    const content = fileContents.get(entry.path);
-    const isMd = entry.name.endsWith(".md");
-
-    return (
-      <div key={entry.path}>
-        <button
-          onClick={() => toggleFile(entry.path)}
-          className={
-            "w-full flex items-center gap-1 py-1 pr-2 text-xs transition-colors " +
-            (isExpanded ? "text-accent font-semibold" : "text-muted hover:text-content")
-          }
-          style={{ paddingLeft }}
-        >
-          {isExpanded ? <ChevronDown size={11} className="shrink-0" /> : <ChevronRight size={11} className="shrink-0" />}
-          <FileText size={12} className={"shrink-0 " + (isMd ? "text-accent" : "text-faint")} />
-          <span className="truncate">{entry.name}</span>
-        </button>
-        {isExpanded && (
-          <div style={{ paddingLeft }}>
-            {isLoading ? (
-              <div className="flex items-center gap-1.5 py-2 pl-5 text-2xs text-faint">
-                <Loader2 size={11} className="animate-spin" /> 加载中...
-              </div>
-            ) : (
-              <pre className="text-2xs font-mono text-muted whitespace-pre-wrap break-words leading-relaxed pl-5 pr-2 py-2 max-h-[300px] overflow-y-auto border-l border-border-subtle ml-1">
-                {content}
-              </pre>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  return <div>{entries.map((e) => renderNode(e, 0))}</div>;
-}
-
-// ---- Directory node (separate component for own expand state) ----
-function DirNode({
-  entry, depth, renderChildren,
+// ---- 详情文件树：目录可展开，文件点击选中（内容在下方独立面板显示） ----
+function DetailFileTree({
+  entries, depth, activePath, onSelect,
 }: {
-  entry: SkillFileEntry; depth: number;
-  renderChildren: (entry: SkillFileEntry, depth: number) => React.ReactNode;
+  entries: SkillFileEntry[]; depth: number; activePath?: string;
+  onSelect: (entry: SkillFileEntry) => void;
 }) {
   const [expanded, setExpanded] = useState(depth === 0);
-  const paddingLeft = `${depth * 14 + 6}px`;
+  const paddingLeft = `${depth * 12 + 6}px`;
 
   return (
     <div>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-1 py-1 pr-2 text-xs text-muted hover:text-content transition-colors"
-        style={{ paddingLeft }}
-      >
-        {expanded ? <ChevronDown size={11} className="shrink-0" /> : <ChevronRight size={11} className="shrink-0" />}
-        {expanded ? <FolderOpen size={12} className="shrink-0 text-accent" /> : <FolderClosed size={12} className="shrink-0 text-faint" />}
-        <span className="truncate">{entry.name}</span>
-      </button>
-      {expanded && entry.children.map((child) => renderChildren(child, depth + 1))}
-    </div>
-  );
-}
-
-function ConnectionSummary({ connection }: { connection: SkillConnectionState }) {
-  return (
-    <div className="flex items-center gap-1.5 pl-6 flex-wrap">
-      <span
-        className={
-          "text-2xs px-1.5 py-0.5 rounded font-medium " +
-          (connection.enabled
-            ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30"
-            : "text-amber-600 bg-amber-50 dark:bg-amber-900/30")
-        }
-      >
-        {connection.enabled ? "Agent 可用" : "Skill 已停用"}
-      </span>
-      {connection.shared && (
-        <span className="text-2xs px-1.5 py-0.5 rounded text-accent bg-accent-soft font-medium">
-          共享连接：{connection.affected_agents.join("、")}
-        </span>
+      {entries.map((entry) =>
+        entry.is_dir ? (
+          <div key={entry.path}>
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="w-full flex items-center gap-1 py-1 pr-2 text-xs text-muted hover:text-content transition-colors"
+              style={{ paddingLeft }}
+            >
+              {expanded ? <ChevronDown size={11} className="shrink-0" /> : <ChevronRight size={11} className="shrink-0" />}
+              {expanded ? <FolderOpen size={12} className="shrink-0 text-accent" /> : <FolderClosed size={12} className="shrink-0 text-faint" />}
+              <span className="truncate">{entry.name}</span>
+            </button>
+            {expanded && (
+              <DetailFileTree entries={entry.children} depth={depth + 1} activePath={activePath} onSelect={onSelect} />
+            )}
+          </div>
+        ) : (
+          <button
+            key={entry.path}
+            onClick={() => onSelect(entry)}
+            title={entry.path}
+            className={
+              "w-full flex items-center gap-1 py-1 pr-2 text-xs rounded transition-colors " +
+              (activePath === entry.path ? "text-accent font-semibold" : "text-muted hover:text-content")
+            }
+            style={{ paddingLeft }}
+          >
+            <FileText size={12} className={"shrink-0 " + (entry.name.toUpperCase().endsWith(".MD") ? "text-accent" : "text-faint")} />
+            <span className="truncate">{entry.name}</span>
+          </button>
+        ),
       )}
     </div>
   );
 }
 
-// ---- Audit section in detail panel：只显示状态，点击跳转审计详情 ----
 function SkillAuditSection({ skill }: { skill: Skill }) {
-  const { skillAudit, auditingSkill, runSkillAudit } = useSkillsStore();
+  const { skillAudit } = useSkillsStore();
   const setView = useUiStore((s) => s.setView);
   const setAuditFocusSkillId = useUiStore((s) => s.setAuditFocusSkillId);
   const meta = skillAudit ? auditVerdictMeta(skillAudit.verdict) : null;
@@ -383,16 +304,6 @@ function SkillAuditSection({ skill }: { skill: Skill }) {
       <div className="flex items-center gap-1.5 mb-2">
         <ShieldCheck size={12} className="text-faint" />
         <span className="text-2xs font-semibold text-faint uppercase tracking-wider">安全审查</span>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            runSkillAudit(skill.id);
-          }}
-          disabled={auditingSkill}
-          className="ml-auto flex items-center gap-1 text-2xs text-faint hover:text-accent transition-colors"
-        >
-          {auditingSkill ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} 重新审查
-        </button>
       </div>
       <button
         onClick={openAudit}
@@ -581,14 +492,17 @@ function SkillUpdateSection({ skill, agentOptions }: { skill: Skill; agentOption
 function SkillDetail() {
   const t = useT();
   const {
-    selectedSkillId, skills, agentOptions, skillConnections, skillContent, loadingContent,
+    selectedSkillId, skills, agentOptions, skillConnections,
     skillFiles, toggleConnect, adoptRealEntry,
   } = useSkillsStore();
   const librarySources = useWorkspaceStore((s) => s.librarySources);
-  const [descExpanded, setDescExpanded] = useState(false);
   const [adoptionAgentId, setAdoptionAgentId] = useState<string | null>(null);
   const [adoptionSourceId, setAdoptionSourceId] = useState("");
   const [homeDirectory, setHomeDirectory] = useState("");
+  const [tab, setTab] = useState<"files" | "settings">("files");
+  const [openFile, setOpenFile] = useState<SkillFileEntry | null>(null);
+  const [openContent, setOpenContent] = useState("");
+  const [openLoading, setOpenLoading] = useState(false);
 
   const skill = skills.find((s) => s.id === selectedSkillId);
 
@@ -604,30 +518,88 @@ function SkillDetail() {
     };
   }, []);
 
+  const flatFiles = useMemo(() => {
+    const out: SkillFileEntry[] = [];
+    const walk = (entries: SkillFileEntry[]) =>
+      entries.forEach((entry) => {
+        if (entry.is_dir) walk(entry.children);
+        else out.push(entry);
+      });
+    walk(skillFiles);
+    return out;
+  }, [skillFiles]);
+
+  const selectFile = async (entry: SkillFileEntry) => {
+    setOpenFile(entry);
+    setOpenLoading(true);
+    try {
+      setOpenContent(await readSkillFileByPath(skill!.id, entry.path));
+    } catch {
+      setOpenContent("（无法读取文件）");
+    } finally {
+      setOpenLoading(false);
+    }
+  };
+
+  // 切换技能时重置文件选择；文件列表就绪后默认选中 SKILL.md（无则第一个文件）
+  useEffect(() => {
+    setOpenFile(null);
+    setOpenContent("");
+  }, [skill?.id]);
+
+  useEffect(() => {
+    if (openFile || flatFiles.length === 0) return;
+    const preferred =
+      flatFiles.find((entry) => entry.name.toUpperCase() === "SKILL.MD") ?? flatFiles[0];
+    selectFile(preferred);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flatFiles]);
+
   if (!skill) {
     return null;
   }
 
   return (
-    <div className="bg-surface">
-      <div className="flex-1 overflow-y-auto">
-        {/* description — 3-line clamp, expandable */}
-        {skill.description && (
-          <div className="px-5 py-3 border-b border-border-subtle">
-            <p className={"text-xs text-muted leading-relaxed " + (descExpanded ? "" : "line-clamp-3")}>
-              {skill.description}
-            </p>
-            {skill.description.length > 120 && (
-              <button
-                onClick={() => setDescExpanded(!descExpanded)}
-                className="flex items-center gap-0.5 mt-1 text-2xs text-accent hover:text-accent-hover"
-              >
-                {descExpanded ? <><ChevronUp size={11} /> 收起</> : <><ChevronDown size={11} /> 展开</>}
-              </button>
+    <div className="relative h-full flex flex-col">
+      <div className={tab === "files" ? "flex-1 min-h-0" : "flex-1 overflow-y-auto"}>
+        {tab === "files" ? (
+          <div className="h-full flex flex-col px-4 py-2">
+            <div className="flex items-center gap-1.5 mb-2 shrink-0">
+              <FolderClosed size={12} className="text-faint" />
+              <span className="text-2xs font-semibold text-faint uppercase tracking-wider">文件列表</span>
+            </div>
+            {flatFiles.length === 0 ? (
+              <div className="text-xs text-faint py-2">无文件</div>
+            ) : (
+              <div className="rounded-lg border border-border-subtle p-1.5 overflow-y-auto max-h-[20%] shrink-0">
+                <DetailFileTree
+                  entries={skillFiles}
+                  depth={0}
+                  activePath={openFile?.path}
+                  onSelect={selectFile}
+                />
+              </div>
+            )}
+
+            <div className="flex items-center gap-1.5 mb-2 mt-3 shrink-0 min-w-0">
+              <FilePen size={12} className="text-faint shrink-0" />
+              <span className="text-2xs font-semibold text-faint uppercase tracking-wider shrink-0">文件内容</span>
+              {openFile && <span className="text-2xs text-faint font-mono truncate">{openFile.path}</span>}
+            </div>
+            {openLoading ? (
+              <div className="flex items-center gap-1.5 py-3 text-2xs text-faint">
+                <Loader2 size={11} className="animate-spin" /> 加载中...
+              </div>
+            ) : openFile ? (
+              <pre className="flex-1 min-h-0 text-2xs font-mono text-muted whitespace-pre-wrap break-words leading-relaxed rounded-lg border border-border-subtle bg-surface-2 p-3 overflow-y-auto">
+                {openContent}
+              </pre>
+            ) : (
+              <div className="text-xs text-faint py-2">在上方选择一个文件查看内容</div>
             )}
           </div>
-        )}
-
+        ) : (
+          <>
         {/* metadata: author / license */}
         {(skill.author || skill.license || skill.version) && (
           <div className="px-5 py-3 border-b border-border-subtle space-y-1.5">
@@ -664,6 +636,104 @@ function SkillDetail() {
           <TagEditor skillId={skill.id} tags={skill.tags} />
         </div>
 
+        {/* Agent connections — V1 图1: 字母圆点 + 名称 + 路径 + 开关 */}
+        <div className="px-5 py-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Link2 size={12} className="text-faint" />
+            <span className="text-2xs font-semibold text-faint uppercase tracking-wider">
+              接线 {skill.links.length}/{agentOptions.length}
+            </span>
+          </div>
+          <div>
+            {agentOptions.map((agent, idx) => {
+              const connection = skillConnections.find((item) => item.agent_id === agent.id);
+              const isReal = connection?.kind === "real_directory" || connection?.kind === "real_file";
+              const linked = Boolean(connection);
+              return (
+                <div
+                  key={agent.id}
+                  className={
+                    "py-2" + (idx < agentOptions.length - 1 ? " border-b border-border-subtle" : "")
+                  }
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span
+                      title={agent.label}
+                      className="inline-grid place-items-center w-[22px] h-[22px] rounded-full font-mono text-[10px] font-bold shrink-0"
+                      style={
+                        linked
+                          ? { background: "rgb(var(--c-heading))", color: "rgb(var(--c-bg-page))" }
+                          : { border: "1px solid rgb(var(--c-border-strong))", color: "rgb(var(--c-muted))" }
+                      }
+                    >
+                      {agent.label.charAt(0).toUpperCase()}
+                    </span>
+                    <span className={"text-xs font-medium shrink-0 " + (linked ? "text-content" : "text-faint")}>
+                      {agent.label}
+                    </span>
+                    {connection && (
+                      <button
+                        data-testid="connection-path-button"
+                        onClick={() => revealInFinder(connection.entry_path)}
+                        className="ml-auto min-w-0 flex items-center gap-1 text-2xs text-faint font-mono transition-colors hover:text-accent"
+                        title={`${connection.entry_path} · 在 Finder 中显示`}
+                      >
+                        <span className="min-w-0 truncate">
+                          {formatSkillPath(connection.entry_path, homeDirectory)}
+                        </span>
+                      </button>
+                    )}
+                    <div className={"shrink-0 flex items-center gap-1.5 " + (connection ? "" : "ml-auto")} onClick={(e) => e.stopPropagation()}>
+                      {isReal && (
+                        <button
+                          onClick={() => {
+                            setAdoptionAgentId(adoptionAgentId === agent.id ? null : agent.id);
+                            setAdoptionSourceId("");
+                          }}
+                          className="btn btn-outline btn-sm text-amber-600"
+                          title="移动真实入口到库源并留下软链"
+                        >
+                          <ArchiveRestore size={12} />
+                        </button>
+                      )}
+                      <MiniToggle
+                        checked={linked}
+                        onChange={() => toggleConnect(skill.id, agent.id)}
+                      />
+                    </div>
+                  </div>
+                  {isReal && adoptionAgentId === agent.id && (
+                    <div className="flex items-center gap-1.5 pl-[30px] mt-1.5">
+                      <select
+                        value={adoptionSourceId}
+                        onChange={(event) => setAdoptionSourceId(event.target.value)}
+                        className="input w-auto min-w-[140px]"
+                      >
+                        <option value="">选择库源</option>
+                        {librarySources.filter((source) => source.enabled).map((source) => (
+                          <option key={source.id} value={source.id}>{source.name}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => {
+                          if (!adoptionSourceId) return;
+                          adoptRealEntry(skill.id, agent.id, adoptionSourceId);
+                          setAdoptionAgentId(null);
+                          setAdoptionSourceId("");
+                        }}
+                        disabled={!adoptionSourceId}
+                        className="btn btn-primary btn-sm"
+                      >
+                        移动并留软链
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         {/* permissions */}
         <div className="px-5 py-3 border-b border-border-subtle">
           <div className="flex items-center gap-1.5 mb-2">
@@ -694,118 +764,28 @@ function SkillDetail() {
         {/* origin & updates */}
         <SkillUpdateSection skill={skill} agentOptions={agentOptions} />
 
-        {/* Agent connections */}
-        <div className="px-5 py-3 border-b border-border-subtle">
-          <div className="flex items-center gap-1.5 mb-2">
-            <Link2 size={12} className="text-faint" />
-            <span className="text-2xs font-semibold text-faint uppercase tracking-wider">接线状态</span>
-          </div>
-          <div className="space-y-2.5">
-            {agentOptions.map((agent) => {
-              const connection = skillConnections.find((item) => item.agent_id === agent.id);
-              const isReal = connection?.kind === "real_directory" || connection?.kind === "real_file";
-              return (
-                <div key={agent.id} className="space-y-1.5">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <AgentGlyph
-                      id={agent.id}
-                      label={agent.label}
-                      size={20}
-                      active={Boolean(connection)}
-                    />
-                    <span className={"text-xs font-medium shrink-0 " + (connection ? "text-content" : "text-faint")}>
-                      {agent.label}
-                    </span>
-                    <div className="ml-auto shrink-0">
-                      {connection?.kind === "symlink" && (
-                        <MiniToggle checked onChange={() => toggleConnect(skill.id, agent.id)} />
-                      )}
-                    </div>
-                    {isReal && (
-                      <button
-                        onClick={() => {
-                          setAdoptionAgentId(adoptionAgentId === agent.id ? null : agent.id);
-                          setAdoptionSourceId("");
-                        }}
-                        className="btn btn-outline btn-sm shrink-0 text-amber-600"
-                        title="移动真实入口到库源并留下软链"
-                      >
-                        <ArchiveRestore size={12} /> 收纳
-                      </button>
-                    )}
-                    {!connection && (
-                      <button
-                        onClick={() => toggleConnect(skill.id, agent.id)}
-                        className="btn btn-outline btn-sm shrink-0"
-                      >
-                        <Link2 size={12} /> 接入
-                      </button>
-                    )}
-                  </div>
-                  {connection ? (
-                    <button
-                      data-testid="connection-path-button"
-                      onClick={() => revealInFinder(connection.entry_path)}
-                      className="flex max-w-full items-center gap-1 pl-6 text-2xs text-faint transition-colors hover:text-accent"
-                      title={`${connection.entry_path} · 在 Finder 中显示`}
-                    >
-                      <FolderOpen size={11} className="shrink-0" />
-                      <span className="min-w-0 truncate font-mono">
-                        {formatSkillPath(connection.entry_path, homeDirectory)}
-                      </span>
-                      <ExternalLink size={10} className="shrink-0 opacity-60" />
-                    </button>
-                  ) : (
-                    <div className="pl-6 text-2xs text-faint">未接线</div>
-                  )}
-                  {connection?.kind === "symlink" && (
-                    <ConnectionSummary connection={connection} />
-                  )}
-                  {isReal && adoptionAgentId === agent.id && (
-                    <div className="flex items-center gap-1.5 pl-6">
-                      <select
-                        value={adoptionSourceId}
-                        onChange={(event) => setAdoptionSourceId(event.target.value)}
-                        className="px-2 py-1 text-2xs border border-border rounded-md bg-transparent min-w-[140px]"
-                      >
-                        <option value="">选择库源</option>
-                        {librarySources.filter((source) => source.enabled).map((source) => (
-                          <option key={source.id} value={source.id}>{source.name}</option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={() => {
-                          if (!adoptionSourceId) return;
-                          adoptRealEntry(skill.id, agent.id, adoptionSourceId);
-                          setAdoptionAgentId(null);
-                          setAdoptionSourceId("");
-                        }}
-                        disabled={!adoptionSourceId}
-                        className="btn btn-primary btn-sm"
-                      >
-                        移动并留软链
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
 
-        {/* document list — inline expandable file tree */}
-        <div className="px-5 py-3">
-          <div className="flex items-center gap-1.5 mb-2">
-            <FileText size={12} className="text-faint" />
-            <span className="text-2xs font-semibold text-faint uppercase tracking-wider">文档列表</span>
-          </div>
-          {skillFiles.length === 0 ? (
-            <div className="text-xs text-faint py-2">{loadingContent ? t("common.loading") : "无文件"}</div>
-          ) : (
-            <div className="bg-page dark:bg-surface-2 rounded-lg border border-border-subtle p-2 max-h-[500px] overflow-y-auto">
-              <FileTree skillId={skill.id} entries={skillFiles} />
-            </div>
-          )}
+          </>
+        )}
+      </div>
+
+      {/* tab 切换（底部浮动胶囊） */}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10">
+        <div className="flex items-center gap-1 rounded-full border border-border-subtle bg-surface p-1 shadow-lg">
+          {(["files", "settings"] as const).map((key) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              aria-label={key === "files" ? "文件" : "设置"}
+              title={key === "files" ? "文件" : "设置"}
+              className={
+                "inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors " +
+                (tab === key ? "bg-heading text-page" : "text-muted hover:bg-surface-hover")
+              }
+            >
+              {key === "files" ? <FileText size={14} /> : <SettingsIcon size={14} />}
+            </button>
+          ))}
         </div>
       </div>
     </div>
@@ -815,7 +795,6 @@ function SkillDetail() {
 // =================== Main View ===================
 
 export default function SkillsView() {
-  const [leftDrawerOpen] = useState(() => window.innerWidth >= 1000);
   const t = useT();
   const [homeDirectory, setHomeDirectory] = useState("");
   useEffect(() => {
@@ -838,6 +817,7 @@ export default function SkillsView() {
  const selectedSkill = selectedSkillId ? skills.find((s) => s.id === selectedSkillId) ?? null : null;
 
   const [railFilter, setRailFilter] = useState<string>(ALL);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [multiSelect, setMultiSelect] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [installOpen, setInstallOpen] = useState(false);
@@ -882,41 +862,42 @@ export default function SkillsView() {
   const railLabel = railFilter === ALL ? "全部" : `「${railFilter.slice(4)}」`;
 
   return (
-    <div
-      className={
-        "skill-layout " +
-        (leftDrawerOpen ? "" : "skill-layout--left-closed")
-      }
-      data-left-open={leftDrawerOpen}
-    >
-      {/* ===== Left rail ===== */}
-      {leftDrawerOpen && (
-        <aside data-testid="skills-left-drawer" className="skills-left-drawer">
-          <div className="rail-section-label">标签聚类</div>
-          <RailItem label="全部" count={skills.length} active={railFilter === ALL} onClick={() => setRailFilter(ALL)} />
-          {tagClusters.map(({ tag, count }) => (
-            <RailItem key={tag} label={tag} count={count} active={railFilter === `tag:${tag}`} onClick={() => setRailFilter(`tag:${tag}`)} />
-          ))}
-          <div className="h-px bg-border-subtle my-2.5 mx-1" />
-          <div className="rail-section-label">库源</div>
-          {librarySources.map((lib) => (
-            <RailItem key={lib.id} label={lib.name} count={libCounts.get(lib.name) || 0} active={railFilter === `lib:${lib.name}`} onClick={() => setRailFilter(`lib:${lib.name}`)} />
-          ))}
-        </aside>
-      )}
-
-      {/* ===== Middle column ===== */}
-      <div className="flex flex-col min-h-0 min-w-0 overflow-hidden">
+    <div className="flex-1 flex flex-col overflow-hidden">
         <div className="skills-toolbar">
+          <ViewToggle mode={viewMode} onChange={setViewMode} />
           <div className="skills-search">
             <Search size={14} className="skills-search-icon" />
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={`筛选${railLabel}聚类下 ${filtered.length} 个 skill`}
+              placeholder={`筛选 ${filtered.length} 个技能`}
               className="input"
             />
           </div>
+          <select
+            value={railFilter}
+            onChange={(e) => setRailFilter(e.target.value)}
+            className="input w-[150px] shrink-0"
+            title="按标签或库源筛选"
+            aria-label="按标签或库源筛选"
+          >
+            <option value={ALL}>全部 ({skills.length})</option>
+            {tagClusters.length > 0 && (
+              <optgroup label="标签聚类">
+                {tagClusters.map(({ tag, count }) => (
+                  <option key={tag} value={`tag:${tag}`}>{tag} ({count})</option>
+                ))}
+              </optgroup>
+            )}
+            {librarySources.length > 0 && (
+              <optgroup label="库源">
+                {librarySources.map((lib) => (
+                  <option key={lib.id} value={`lib:${lib.name}`}>{lib.name} ({libCounts.get(lib.name) || 0})</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+          <div className="flex-1 min-w-0" />
           <button
             onClick={() => { setMultiSelect(!multiSelect); if (multiSelect) setCheckedIds(new Set()); }}
             className={"btn btn-sm shrink-0 " + (multiSelect ? "btn-primary" : "btn-outline")}
@@ -931,10 +912,6 @@ export default function SkillsView() {
           >
             <Download size={13} /> <span className="skills-toolbar-label">安装</span>
           </button>
-          <button onClick={() => useUiStore.getState().setView("presets")} className="btn btn-ghost btn-sm shrink-0" title="应用预设">
-            <Layers size={13} /> <span className="skills-toolbar-label">应用预设</span>
-          </button>
-         <div className="flex-1 min-w-0" />
         </div>
 
         {/* multi-select batch bar */}
@@ -1074,17 +1051,17 @@ export default function SkillsView() {
           </div>
         )}
 
-        {/* table header */}
-        <div className={"skills-table-header skills-table-grid"}>
-          <span>名称</span>
-          <span className="text-center">智能体</span>
-          <span className="text-center">权限</span>
-          <span className="text-center">体检</span>
-          <span className="text-center">状态</span>
-        </div>
+        <ContentTitle
+          title={t("skills.title")}
+          meta={t("skills.meta", {
+            skills: skills.length,
+            links: skills.reduce((n, s) => n + s.links.length, 0),
+            unchecked: skills.filter((s) => !s.audit_verdict).length,
+          })}
+        />
 
-        {/* skill table */}
-        <div className="flex-1 overflow-y-auto bg-surface">
+        {/* skill list / grid */}
+        <div className={"flex-1 overflow-y-auto " + (viewMode === "list" ? "" : "px-6 pb-6 pt-1")}>
           {filtered.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state__icon">
@@ -1099,22 +1076,38 @@ export default function SkillsView() {
                 <p className="empty-state__hint">换个关键词或清除筛选条件试试</p>
               )}
             </div>
+          ) : viewMode === "list" ? (
+            <div className="list-panel mx-6 mb-6">
+              {filtered.map((skill) => (
+                <SkillTableRow
+                  key={skill.id}
+                  skill={skill}
+                  agentOptions={agentOptions}
+                  selected={selectedSkillId === skill.id}
+                  multiSelect={multiSelect}
+                  checked={checkedIds.has(skill.id)}
+                  onSelect={() => selectSkill(skill.id)}
+                  onToggleCheck={() => toggleCheck(skill.id)}
+                />
+              ))}
+            </div>
           ) : (
-            filtered.map((skill) => (
-              <SkillTableRow
-                key={skill.id}
-                skill={skill}
-                agentOptions={agentOptions}
-                selected={selectedSkillId === skill.id}
-                multiSelect={multiSelect}
-                checked={checkedIds.has(skill.id)}
-                onSelect={() => selectSkill(skill.id)}
-                onToggleCheck={() => toggleCheck(skill.id)}
-              />
-            ))
+            <div className="card-grid">
+              {filtered.map((skill) => (
+                <SkillCard
+                  key={skill.id}
+                  skill={skill}
+                  agentOptions={agentOptions}
+                  selected={selectedSkillId === skill.id}
+                  multiSelect={multiSelect}
+                  checked={checkedIds.has(skill.id)}
+                  onSelect={() => selectSkill(skill.id)}
+                  onToggleCheck={() => toggleCheck(skill.id)}
+                />
+              ))}
+            </div>
           )}
         </div>
-      </div>
 
       {/* ===== Skill detail drawer (shared overlay) ===== */}
       <DetailDrawer
@@ -1135,15 +1128,19 @@ export default function SkillsView() {
             </button>
           )
         }
-        actions={
+        headerActions={
           selectedSkill && (
             <>
               <button
                 onClick={() => toggleSkillEnabled(selectedSkill.id, !selectedSkill.enabled)}
-                className={selectedSkill.enabled ? "btn btn-outline text-emerald-500" : "btn btn-primary"}
+                className={
+                  "btn-icon rounded-full bg-surface-2 " +
+                  (selectedSkill.enabled ? "text-accent" : "text-faint")
+                }
+                title={selectedSkill.enabled ? "停用" : "启用"}
+                aria-label={selectedSkill.enabled ? "停用" : "启用"}
               >
                 <Power size={14} />
-                {selectedSkill.enabled ? "已启用" : "已停用"}
               </button>
               <button
                 onClick={() =>
@@ -1153,9 +1150,11 @@ export default function SkillsView() {
                     path: selectedSkill.path,
                   })
                 }
-                className="btn btn-ghost text-red-500 ml-auto"
+                className="btn-icon rounded-full bg-surface-2 text-red-500 hover:text-red-600"
+                title={t("common.delete")}
+                aria-label={t("common.delete")}
               >
-                <Trash2 size={14} /> {t("common.delete")}
+                <Trash2 size={14} />
               </button>
             </>
           )

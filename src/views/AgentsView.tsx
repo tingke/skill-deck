@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useSkillsStore } from "../stores/skills";
 import { useExtensionsStore } from "../stores/extensions";
 import { useWorkspaceStore } from "../stores/workspace";
@@ -15,12 +15,17 @@ import {
   FileCog,
   ToggleLeft,
   ToggleRight,
+  ChevronRight,
 } from "lucide-react";
+import ViewToggle from "../components/ViewToggle";
+import SearchInput from "../components/SearchInput";
+import { ContentTitle } from "../components/PageHeader";
 import type { AgentRow } from "../types";
 import { useDeleteConfirmation } from "../lib/deleteConfirmation";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
 import DetailDrawer from "../components/DetailDrawer";
 import { AgentGlyph } from "../components/AgentGlyph";
+import PageHeader from "../components/PageHeader";
 
 const toast = () => useToastStore.getState();
 
@@ -47,8 +52,17 @@ export default function AgentsView() {
   const [editing, setEditing] = useState<AgentRow | null>(null);
   const [creating, setCreating] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [query, setQuery] = useState("");
   const deleteConfirmation = useDeleteConfirmation();
   const detailAgent = detailId ? agents.find((a) => a.id === detailId) ?? null : null;
+  const filteredAgents = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return agents;
+    return agents.filter(
+      (a) => a.label.toLowerCase().includes(q) || a.id.toLowerCase().includes(q),
+    );
+  }, [agents, query]);
 
   const handleToggle = async (agent: AgentRow) => {
     try {
@@ -85,21 +99,45 @@ export default function AgentsView() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-surface">
-        <div className="text-xs text-faint">
-          {t("agents.desc")}
-        </div>
-        <button
-          onClick={() => setCreating(true)}
-          className="btn btn-primary shrink-0 ml-3"
-        >
-          <Plus size={14} /> {t("agents.add")}
-        </button>
-      </div>
+      <PageHeader
+        toolbar={
+          <>
+            <ViewToggle mode={viewMode} onChange={setViewMode} />
+            <SearchInput value={query} onChange={setQuery} placeholder={t("agents.search")} />
+          </>
+        }
+        actions={
+          <button onClick={() => setCreating(true)} className="btn btn-primary">
+            <Plus size={14} /> {t("agents.add")}
+          </button>
+        }
+      />
 
-      <div className="flex-1 overflow-y-auto bg-page p-6">
-        <div className="grid grid-cols-2 gap-3">
-          {agents.map((a) => {
+      <div className="flex-1 overflow-y-auto">
+        <ContentTitle title={t("agents.title")} meta={t("agents.desc")} />
+        {viewMode === "list" ? (
+          <div className="list-panel mx-6 mb-6">
+            {filteredAgents.map((a) => (
+              <button
+                key={a.id}
+                onClick={() => setDetailId(a.id)}
+                className={"list-row list-row--generic" + (a.enabled ? "" : " opacity-60")}
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <AgentGlyph id={a.id} label={a.label} size={18} active={a.enabled} />
+                  <span className="list-row__name">{a.label}</span>
+                </span>
+                <span className="list-row__desc font-mono">~/{a.skills_dir}</span>
+                <span className="text-2xs text-faint shrink-0 tnum">
+                  {countSkills(a.id)} skills · {countExt(a.id, "mcp")} mcp
+                </span>
+                <ChevronRight size={14} className="list-row__chev" />
+              </button>
+            ))}
+          </div>
+        ) : (
+        <div className="px-6 pb-6 card-grid">
+          {filteredAgents.map((a) => {
             const c = colorOf(a.color);
             return (
               <div
@@ -131,7 +169,7 @@ export default function AgentsView() {
                         handleToggle(a);
                       }}
                       title={a.enabled ? t("agents.enableHint") : t("agents.disableHint")}
-                      className={`p-1 ${a.enabled ? "text-emerald-500" : "text-faint"}`}
+                      className={`p-1 ${a.enabled ? "text-accent" : "text-faint"}`}
                     >
                       {a.enabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
                     </button>
@@ -151,16 +189,16 @@ export default function AgentsView() {
 
                 <div className="flex items-center gap-3 mt-3 text-[13px]">
                   <span className="text-faint">
-                    <span className={`font-semibold ${c.text}`}>{countSkills(a.id)}</span> skills
+                    <span className={`font-semibold ${countSkills(a.id) === 0 ? "text-faint" : c.text}`}>{countSkills(a.id)}</span> skills
                   </span>
                   <span className="text-faint">
-                    <span className={`font-semibold ${c.text}`}>{countExt(a.id, "mcp")}</span> mcp
+                    <span className={`font-semibold ${countExt(a.id, "mcp") === 0 ? "text-faint" : c.text}`}>{countExt(a.id, "mcp")}</span> mcp
                   </span>
                   <span className="text-faint">
-                    <span className={`font-semibold ${c.text}`}>{countExt(a.id, "plugin")}</span> plugins
+                    <span className={`font-semibold ${countExt(a.id, "plugin") === 0 ? "text-faint" : c.text}`}>{countExt(a.id, "plugin")}</span> plugins
                   </span>
                   <span className="text-faint">
-                    <span className={`font-semibold ${c.text}`}>{countExt(a.id, "hook")}</span> hooks
+                    <span className={`font-semibold ${countExt(a.id, "hook") === 0 ? "text-faint" : c.text}`}>{countExt(a.id, "hook")}</span> hooks
                   </span>
                   <span className={`badge font-medium ${a.enabled ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400" : "text-faint bg-surface-2"}`}>
                     {a.enabled ? t("common.enabled") : t("common.disabled")}
@@ -170,6 +208,7 @@ export default function AgentsView() {
             );
           })}
         </div>
+        )}
 
         {agents.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-faint">
@@ -222,19 +261,31 @@ export default function AgentsView() {
             <>
               <button
                 onClick={() => handleToggle(detailAgent)}
-                className={detailAgent.enabled ? "btn btn-outline" : "btn btn-primary"}
+                className={
+                  "btn-icon rounded-full bg-surface-2 " +
+                  (detailAgent.enabled ? "text-accent" : "text-faint")
+                }
+                title={detailAgent.enabled ? t("agents.disableAction") : t("agents.enableAction")}
+                aria-label={detailAgent.enabled ? t("agents.disableAction") : t("agents.enableAction")}
               >
-                {detailAgent.enabled ? t("agents.disableAction") : t("agents.enableAction")}
+                {detailAgent.enabled ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
               </button>
-              <button onClick={() => setEditing(detailAgent)} className="btn btn-primary ml-auto">
-                <Edit3 size={14} /> {t("common.edit")}
+              <button
+                onClick={() => setEditing(detailAgent)}
+                className="btn-icon rounded-full bg-surface-2"
+                title={t("common.edit")}
+                aria-label={t("common.edit")}
+              >
+                <Edit3 size={14} />
               </button>
               {detailAgent.id !== "claude" && detailAgent.id !== "codex" && (
                 <button
                   onClick={() => deleteConfirmation.request(detailAgent.label, () => handleDeleteFromDetail(detailAgent))}
-                  className="btn btn-ghost text-red-500"
+                  className="btn-icon rounded-full bg-surface-2 text-red-500 hover:text-red-600"
+                  title={t("common.delete")}
+                  aria-label={t("common.delete")}
                 >
-                  <Trash2 size={14} /> {t("common.delete")}
+                  <Trash2 size={14} />
                 </button>
               )}
             </>
@@ -277,7 +328,7 @@ export default function AgentsView() {
                   ["hooks", countExt(detailAgent.id, "hook")],
                 ].map(([label, count]) => (
                   <div key={String(label)} className="rounded-lg bg-surface-2 px-2 py-2 text-center">
-                    <div className={`text-sm font-semibold ${colorOf(detailAgent.color).text}`}>{count}</div>
+                    <div className={`text-sm font-semibold ${Number(count) === 0 ? "text-faint" : colorOf(detailAgent.color).text}`}>{count}</div>
                     <div className="text-2xs text-faint">{label}</div>
                   </div>
                 ))}

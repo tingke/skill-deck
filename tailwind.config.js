@@ -28,6 +28,7 @@ export default {
         "accent-fg":      "rgb(var(--c-accent-fg) / <alpha-value>)",
         "accent-inverse": "rgb(var(--c-accent-inverse) / <alpha-value>)",
         "accent-soft":    "rgb(var(--c-accent-soft) / <alpha-value>)",
+        "accent-text":    "rgb(var(--c-accent-text) / <alpha-value>)",
 
         secondary:         "rgb(var(--c-secondary) / <alpha-value>)",
         "secondary-soft":  "rgb(var(--indigo-400) / <alpha-value>)",

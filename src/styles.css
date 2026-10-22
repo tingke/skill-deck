@@ -11,12 +11,12 @@
      Layer 3  Component   component utility classes (.btn, .input, .card …)
 
    Visual direction: refined, restrained, professional developer-tool
-   aesthetic. Single confident indigo accent on a warm-neutral surface.
-   No ambient color glows, no saturated multi-stop gradients, no
-   glowing shadows. Glass is reserved for chrome (toolbar / sidebar)
-   because the underlying Tauri title bar benefits from translucency.
-   Cards stay solid — depth comes from clean borders and a single
-   soft shadow, not from blur.
+   aesthetic. Single confident violet accent (calibrated #6e56cf) on a
+   neutral surface. Depth comes from a material layer: Liquid Glass
+   (web approximation) reserved for chrome — sidebar / rail / toolbar /
+   inspector / floating controls — over an ambient wallpaper gradient;
+   glass is a light/dark token pair, see --mat-* and --grad-ambient.
+   Cards and content areas stay solid — readability beats translucency.
    ================================================================ */
 
 
@@ -115,22 +115,11 @@
 
     /* ---- Workspace layout scale ---- */
     --height-title-bar: 48px;
-    --height-workspace-toolbar: 48px;
-    --height-view-toolbar: 44px;
-    --width-sidebar-expanded: 232px;
+    --height-page-bar: 40px;
+    --width-sidebar-expanded: 212px;
     --width-sidebar-collapsed: 64px;
-    --width-left-drawer: 200px;
-    --width-skill-name-min: 156px;
-    --width-skill-name-flex: 28%;
-    --width-skill-name-max: 320px;
-    --width-skill-agents: 88px;
-    --width-skill-permissions: 44px;
-    --width-skill-permissions-max: 120px;
-    --width-skill-audit: 40px;
-    --width-skill-audit-max: 90px;
-    --width-skill-state: 52px;
-    --width-skill-state-max: 90px;
-    --width-search: 280px;
+    --width-left-drawer: 196px; /* (V6) rail removed — dropdown filter replaces it */
+    --width-search: 180px;
     --offset-macos-traffic-lights: 92px;
 
     /* ---- Motion (kept conservative: small, no spring) ---- */
@@ -163,12 +152,13 @@
     --c-faint:          148 163 184;          /* slate-400  */
     --c-on-accent:      255 255 255;
 
-    /* Single confident accent — indigo-600 */
-    --c-accent:         79 70 229;            /* indigo-600 */
-    --c-accent-hover:   67 56 202;            /* indigo-700 */
+    /* Single confident accent — calibrated violet (#6e56cf, V3/V4 merge) */
+    --c-accent:         110 86 207;           /* #6e56cf violet-600 */
+    --c-accent-hover:   95 72 189;            /* #5f48bd */
     --c-accent-fg:      255 255 255;
-    --c-accent-soft:    238 242 255;          /* indigo-50  */
-    --c-accent-glow:    79 70 229;
+    --c-accent-soft:    237 234 252;          /* violet tint surface */
+    --c-accent-glow:    110 86 207;
+    --c-accent-text:    110 86 207;           /* icons/links on surface */
 
     --c-secondary:      99 102 241;           /* indigo-500 (lighter, for tags) */
     --c-tertiary:       14 165 233;           /* sky-500 (used very sparingly)  */
@@ -178,31 +168,61 @@
     --c-warning: var(--amber-500);
     --c-info:    var(--blue-500);
 
-    --c-focus: var(--indigo-500);
+    --c-focus: var(--c-accent);
+
+    /* ---- Material layer — Liquid Glass (web approximation) ----
+       Glass is chrome-only: sidebar / rail / toolbar / inspector /
+       floating controls. Content and cards stay solid. */
+    --mat-glass-bg:        linear-gradient(135deg, rgb(255 255 255 / 0.48), rgb(255 255 255 / 0.16)), rgb(255 255 255 / 0.08);
+    --mat-glass-border:    rgb(255 255 255 / 0.52);
+    --mat-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 0.62), inset 0 -1px 0 rgb(255 255 255 / 0.16);
+    --mat-glass-blur:      28px;
+    --mat-glass-saturate:  1.9;
+    --mat-glass-shadow:    0 10px 34px rgb(38 30 80 / 0.14);
+    --mat-content-tint:    rgb(246 246 250 / 0.60);
+    --grad-ambient:        radial-gradient(42% 60% at 10% 6%, rgb(124 92 252 / 0.52) 0%, transparent 60%),
+                           radial-gradient(50% 66% at 88% 10%, rgb(255 158 205 / 0.48) 0%, transparent 58%),
+                           radial-gradient(55% 70% at 80% 92%, rgb(96 175 255 / 0.50) 0%, transparent 60%),
+                           radial-gradient(60% 60% at 22% 88%, rgb(255 196 140 / 0.40) 0%, transparent 55%),
+                           linear-gradient(160deg, #eef0fb 0%, #f7eef8 50%, #eaf1fb 100%);
   }
 
   .dark {
-    --c-bg-page:        13 14 22;
-    --c-surface:        22 24 34;
-    --c-surface-hover:  30 33 46;
-    --c-surface-2:      18 20 28;
+    /* V6 canvas palette: warm dark over ambient gradient */
+    --c-bg-page:        19 19 24;             /* #131318 */
+    --c-surface:        35 35 41;             /* #232329 */
+    --c-surface-hover:  46 46 54;             /* #2e2e36 */
+    --c-surface-2:      28 28 34;             /* #1c1c22 */
     --c-overlay:        0 0 0;
 
-    --c-border:         42 46 60;
-    --c-border-subtle:  30 33 46;
-    --c-border-strong:  58 62 80;
+    --c-border:         48 48 58;
+    --c-border-subtle:  37 37 45;
+    --c-border-strong:  66 66 78;
 
-    --c-content:        226 232 240;
-    --c-heading:        248 250 252;
-    --c-muted:          148 163 184;
-    --c-faint:          100 116 139;
+    --c-content:        242 242 245;          /* #f2f2f5 */
+    --c-heading:        246 246 249;
+    --c-muted:          182 182 192;          /* #b6b6c0 */
+    --c-faint:          133 133 143;          /* #85858f */
     --c-on-accent:      255 255 255;
 
-    --c-accent:         129 140 248;          /* indigo-400, brighter for dark */
-    --c-accent-hover:   165 180 252;          /* indigo-300 */
-    --c-accent-fg:      15 23 42;
-    --c-accent-soft:    30 27 75;             /* deep indigo tint */
-    --c-accent-glow:    129 140 248;
+    --c-accent:         110 86 207;           /* same violet fill as light; white fg keeps AA */
+    --c-accent-hover:   124 102 224;          /* #7c66e0 */
+    --c-accent-fg:      255 255 255;
+    --c-accent-soft:    46 38 84;             /* deep violet tint */
+    --c-accent-glow:    158 142 244;
+    --c-accent-text:    158 142 244;          /* lighter violet for icons/links on dark */
+
+    /* Material layer — dark: glass flips to dark tint over ambient glow */
+    --mat-glass-bg:        linear-gradient(135deg, rgb(255 255 255 / 0.13), rgb(255 255 255 / 0.04)), rgb(22 22 30 / 0.34);
+    --mat-glass-border:    rgb(255 255 255 / 0.14);
+    --mat-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 0.14), inset 0 -1px 0 rgb(255 255 255 / 0.05);
+    --mat-glass-shadow:    0 12px 40px rgb(0 0 0 / 0.50);
+    --mat-content-tint:    rgb(14 14 18 / 0.58);
+    --grad-ambient:        radial-gradient(42% 60% at 10% 6%, rgb(139 102 255 / 0.40) 0%, transparent 60%),
+                           radial-gradient(50% 66% at 88% 10%, rgb(236 72 153 / 0.30) 0%, transparent 58%),
+                           radial-gradient(55% 70% at 80% 92%, rgb(64 140 255 / 0.34) 0%, transparent 60%),
+                           radial-gradient(60% 60% at 22% 88%, rgb(240 150 70 / 0.22) 0%, transparent 55%),
+                           linear-gradient(160deg, #131318 0%, #151320 50%, #0f151c 100%);
 
     --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.30);
     --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.30), 0 1px 3px -1px rgb(0 0 0 / 0.35);
@@ -222,22 +242,26 @@
      highlight only. Hover = color shift, not movement.
   */
   .btn {
-    @apply inline-flex items-center justify-center rounded-md
-           text-xs font-medium
+    @apply inline-flex items-center justify-center
+           font-medium
            transition-colors
            disabled:opacity-40 disabled:pointer-events-none
            select-none;
+    height: 26px;
     gap: var(--space-1-5);
-    padding: var(--space-1-5) var(--space-3);
+    padding: 0 var(--space-3);
+    border-radius: 7px;
+    font-size: 12px;
     border: 1px solid transparent;
   }
-  .btn-sm { padding: var(--space-1) var(--space-2); font-size: var(--text-2xs); }
-  .btn-lg { padding: var(--space-2-5) var(--space-4); font-size: var(--text-sm); }
+  .btn-sm { height: 22px; padding: 0 var(--space-2); font-size: 11px; }
+  .btn-lg { height: 32px; padding: 0 var(--space-4); font-size: var(--text-2xs); }
 
   /* primary — solid accent, the strongest brand element allowed */
   .btn-primary {
     background: rgb(var(--c-accent));
     color: rgb(var(--c-on-accent));
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 3px 10px rgb(var(--c-accent) / 0.35);
   }
   .btn-primary:hover {
     background: rgb(var(--c-accent-hover));
@@ -298,9 +322,10 @@
            hover:bg-surface-hover
            select-none;
     color: rgb(var(--c-muted));
-    width: calc(var(--icon-md) + var(--space-3));
-    height: calc(var(--icon-md) + var(--space-3));
-    padding: var(--space-1-5);
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    flex-shrink: 0;
   }
   .btn-icon:hover { color: rgb(var(--c-heading)); }
   .btn-icon:active { background: rgb(var(--c-surface-2)); }
@@ -355,13 +380,15 @@
 
   /* ---- Form controls ---- */
   .input {
-    @apply w-full rounded-md border
-           text-sm
+    @apply w-full border
            transition-colors;
+    height: 26px;
+    padding: 0 var(--space-2-5);
+    border-radius: 7px;
+    font-size: 12px;
     color: rgb(var(--c-content));
     background: rgb(var(--c-surface));
     border-color: rgb(var(--c-border));
-    padding: var(--space-1-5) var(--space-3);
   }
   .input::placeholder {
     color: rgb(var(--c-faint));
@@ -435,9 +462,8 @@
   /* ---- Application shell ---- */
   .app-shell {
     display: flex;
-    flex-direction: column;
     height: 100vh;
-    background: rgb(var(--c-bg-page));
+    background: var(--grad-ambient);
     color: rgb(var(--c-content));
   }
 
@@ -447,6 +473,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    background: var(--mat-content-tint);
   }
 
   .workspace-body {
@@ -464,34 +491,8 @@
     overflow: hidden;
   }
 
-  /* Toolbar — frosted strip */
-  .workspace-toolbar {
-    display: flex;
-    width: 100%;
-    align-items: center;
-    gap: var(--space-2);
-    height: var(--height-workspace-toolbar);
-    padding: 0 var(--space-3);
-    padding-left: var(--offset-macos-traffic-lights);
-    flex-shrink: 0;
-    border-bottom: 1px solid rgb(var(--c-border) / 0.6);
-    background: rgb(var(--c-surface) / 0.78);
-    backdrop-filter: blur(14px) saturate(150%);
-    -webkit-backdrop-filter: blur(14px) saturate(150%);
-  }
-
-  .workspace-toolbar-left,
-  .workspace-toolbar-right {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    min-width: 0;
-  }
-
-  .workspace-toolbar-spacer {
-    flex: 1;
-    min-width: 0;
-  }
+  /* Toolbar — (V6) removed: global controls live in the sidebar footer;
+     each page renders its own floating glass bar via .page-header */
 
   /* Sidebar — frosted, hairline divider, no decorative glow */
   .app-sidebar {
@@ -499,10 +500,11 @@
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
-    background: rgb(var(--c-surface) / 0.75);
-    backdrop-filter: blur(14px) saturate(150%);
-    -webkit-backdrop-filter: blur(14px) saturate(150%);
-    border-right: 1px solid rgb(var(--c-border) / 0.6);
+    background: var(--mat-glass-bg);
+    backdrop-filter: blur(var(--mat-glass-blur)) saturate(var(--mat-glass-saturate));
+    -webkit-backdrop-filter: blur(var(--mat-glass-blur)) saturate(var(--mat-glass-saturate));
+    border-right: 1px solid var(--mat-glass-border);
+    box-shadow: var(--mat-glass-highlight);
     transition: width var(--duration-normal) var(--ease-fast);
   }
 
@@ -562,34 +564,35 @@
     width: calc(100% + var(--space-4));
     align-items: center;
     gap: var(--space-2);
-    min-height: var(--height-workspace-toolbar);
+    min-height: 64px;
     margin: 0 calc(var(--space-2) * -1) var(--space-2);
-    padding: var(--space-2) var(--space-3);
+    padding: 36px var(--space-3) var(--space-2);
     flex-shrink: 0;
   }
 
   .app-sidebar--collapsed .app-sidebar-nav-top {
+    flex-direction: column;
     justify-content: center;
   }
 
-  /* Sidebar items — pill, hover = surface tint */
+  /* Sidebar items — pill, hover = surface tint (V6: compact 28px rows) */
   .sidebar-item {
     display: flex;
     width: 100%;
     align-items: center;
     gap: var(--space-2);
-    min-height: calc(var(--icon-md) + var(--space-3));
+    min-height: 28px;
     padding: var(--space-1) var(--space-2);
-    border-radius: var(--radius-md);
+    border-radius: 7px;
     color: rgb(var(--c-muted));
-    font-size: var(--text-xs);
+    font-size: var(--text-2xs);
     font-weight: 500;
     transition: background-color var(--duration-fast) var(--ease-fast),
                 color var(--duration-fast) var(--ease-fast);
   }
 
   .sidebar-item + .sidebar-item {
-    margin-top: 2px;
+    margin-top: 1px;
   }
 
   .sidebar-item:hover {
@@ -597,10 +600,11 @@
     color: rgb(var(--c-heading));
   }
 
-  /* Active sidebar item — solid accent, no gradient, no glow */
+  /* Active sidebar item — solid accent with the V6 glow */
   .sidebar-item--active {
     background: rgb(var(--c-accent));
     color: rgb(var(--c-on-accent));
+    box-shadow: 0 3px 10px rgb(var(--c-accent) / 0.40);
   }
   .sidebar-item--active:hover {
     background: rgb(var(--c-accent-hover));
@@ -614,24 +618,34 @@
 
   .sidebar-badge {
     margin-left: auto;
-    padding: 1px var(--space-1-5);
-    border-radius: 9999px;
-    background: rgb(var(--c-surface-2));
+    padding: 0;
     color: rgb(var(--c-faint));
     font-family: var(--font-mono);
-    font-size: var(--text-2xs);
+    font-size: 10px;
     line-height: 1.2;
     font-weight: 500;
     font-variant-numeric: tabular-nums;
   }
 
   .sidebar-item--active .sidebar-badge {
-    background: rgb(255 255 255 / 0.20);
-    color: white;
+    color: rgb(255 255 255 / 0.78);
   }
 
-  .dark .sidebar-item--active .sidebar-badge {
-    background: rgb(15 23 42 / 0.20);
+  /* Nav groups — small gap between sections */
+  .sidebar-group + .sidebar-group {
+    margin-top: var(--space-1-5);
+  }
+
+  /* Nav group label — shared by sidebar sections and filter rails (V6 pg-rgroup) */
+  .nav-group-label {
+    padding: var(--space-2) var(--space-2) var(--space-1);
+    color: rgb(var(--c-faint));
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .sidebar-footer {
@@ -700,89 +714,141 @@ code, pre, kbd { font-family: var(--font-mono); }
     0 1px 2px rgb(0 0 0 / 0.28);
 }
 
-.skill-layout {
-  display: grid;
-  grid-template-columns: var(--width-left-drawer) minmax(0, 1fr);
-  height: 100%;
-  min-height: 0;
-}
+/* (V6) skills left rail removed — tag/library filtering lives in the toolbar dropdown */
 
-.skill-layout--left-closed {
-  grid-template-columns: minmax(0, 1fr);
+/* Segmented control (V6 pg-seg) — view switch in floating bars */
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 7px;
+  background: rgb(var(--c-surface-hover));
+  border: 1px solid rgb(var(--c-border));
 }
-
-.skills-left-drawer {
-  overflow-y: auto;
-  padding: var(--space-3) var(--space-2);
-  background: rgb(var(--c-surface) / 0.5);
-  border-right: 1px solid rgb(var(--c-border) / 0.6);
-}
-
-.rail-section-label {
-  padding: 0 var(--space-2) var(--space-2);
-  color: rgb(var(--c-faint));
-  font-size: var(--text-2xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.rail-item {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  min-height: calc(var(--icon-md) + var(--space-3));
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-md);
+.seg-btn {
+  padding: 2px 10px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 500;
   color: rgb(var(--c-muted));
-  font-size: var(--text-xs);
-  cursor: pointer;
   transition: background-color var(--duration-fast) var(--ease-fast), color var(--duration-fast) var(--ease-fast);
 }
-
-.rail-item:hover {
-  background: rgb(var(--c-surface-hover));
+.seg-btn.on {
+  background: rgb(var(--c-surface));
   color: rgb(var(--c-heading));
+  box-shadow: var(--shadow-xs);
 }
 
-.rail-item--active {
-  background: rgb(var(--c-accent-soft));
-  color: rgb(var(--c-accent));
+/* Selected card ring (V6 pg-cardrow.sel) */
+.card-selected {
+  border-color: rgb(var(--c-accent)) !important;
+  box-shadow: 0 0 0 2px rgb(var(--c-accent) / 0.22);
+}
+
+/* ---- V1 list panel + rows: bordered solid panel, 46px hairline rows ----
+   不用 overflow:hidden（会裁掉行内「更多」下拉菜单），
+   改为给首行/末行做圆角。 */
+.list-panel {
+  background: rgb(var(--c-surface));
+  border: 1px solid rgb(var(--c-border-subtle));
+  border-radius: 11px;
+}
+
+.list-panel > :first-child {
+  border-radius: 10px 10px 0 0;
+}
+
+.list-panel > :last-child {
+  border-radius: 0 0 10px 10px;
+}
+
+.list-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr) auto auto;
+  gap: var(--space-4);
+  align-items: center;
+  width: 100%;
+  min-height: 46px;
+  padding: var(--space-1-5) 14px;
+  border-bottom: 1px solid rgb(var(--c-border-subtle));
+  transition: background-color var(--duration-fast) var(--ease-fast);
+  text-align: left;
+}
+.list-row:last-child { border-bottom: 0; }
+.list-row:hover { background: rgb(var(--c-surface-hover)); }
+.list-row--selected { background: rgb(var(--c-accent-soft)); }
+.dark .list-row--selected { background: rgb(var(--c-accent-soft) / 0.4); }
+
+/* Skills variant: name | desc | agent dots | audit | chevron */
+.list-row--skill {
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr) auto auto 14px;
+  cursor: pointer;
+}
+
+/* Compact variant: name | chevron (file lists) */
+.list-row--file {
+  grid-template-columns: minmax(0, 1fr) 14px;
+  min-height: 34px;
+  cursor: pointer;
+}
+
+/* Generic clickable variant: name | desc | meta | chevron */
+.list-row--generic {
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr) auto 14px;
+  cursor: pointer;
+}
+
+.list-row__name {
+  font-size: 13px;
   font-weight: 600;
+  color: rgb(var(--c-heading));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.dark .rail-item--active {
-  background: rgb(var(--c-accent-soft) / 0.4);
-  color: rgb(var(--c-accent-hover));
+.list-row__desc {
+  font-size: 12px;
+  color: rgb(var(--c-muted));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.rail-item-count {
+.list-row__dots {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.list-row__chev {
+  width: 14px;
+  height: 14px;
   color: rgb(var(--c-faint));
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  font-variant-numeric: tabular-nums;
 }
 
-.rail-item--active .rail-item-count {
-  color: rgb(var(--c-accent));
-}
-
+/* Skills toolbar — same floating glass pill as .page-header (V6) */
 .skills-toolbar {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: var(--height-view-toolbar);
-  padding: 0 var(--space-3);
-  border-bottom: 1px solid rgb(var(--c-border) / 0.6);
+  height: var(--height-page-bar);
+  margin: 10px 12px 0;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--mat-glass-border);
+  border-radius: 10px;
   flex-shrink: 0;
   container-type: inline-size;
-  background: rgb(var(--c-surface) / 0.5);
+  background: var(--mat-glass-bg);
+  backdrop-filter: blur(var(--mat-glass-blur)) saturate(var(--mat-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--mat-glass-blur)) saturate(var(--mat-glass-saturate));
+  box-shadow: var(--mat-glass-highlight), var(--mat-glass-shadow);
+  z-index: var(--z-sticky);
 }
 
 .skills-search {
   position: relative;
-  flex: 1 1 var(--width-search);
+  width: var(--width-search);
+  flex: none;
   min-width: 0;
 }
 
@@ -805,35 +871,22 @@ code, pre, kbd { font-family: var(--font-mono); }
   min-width: 0;
 }
 
+/* Search input with leading magnifier icon: keep text clear of the icon */
+.search-input {
+  padding-left: var(--space-7);
+}
+
+/* (V1) legacy table header/grid removed — .list-panel/.list-row replace them */
+
 @container (max-width: 380px) {
   .skills-toolbar-label {
     display: none;
   }
 }
 
-.skills-table-header {
-  display: grid;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1-5) var(--space-4);
-  border-bottom: 1px solid rgb(var(--c-border) / 0.6);
-  background: rgb(var(--c-surface-2) / 0.5);
-  flex-shrink: 0;
-  color: rgb(var(--c-faint));
-  font-size: var(--text-2xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
+/* (V1) legacy .skills-table-header/.skills-table-grid removed — list rows live in .list-panel */
 
-.skills-table-grid {
-  grid-template-columns:
-    minmax(var(--width-skill-name-min), clamp(var(--width-skill-name-min), var(--width-skill-name-flex), var(--width-skill-name-max)))
-    minmax(var(--width-skill-agents), 1fr)
-    minmax(var(--width-skill-permissions), var(--width-skill-permissions-max))
-    minmax(var(--width-skill-audit), var(--width-skill-audit-max))
-    minmax(var(--width-skill-state), var(--width-skill-state-max));
-}
+/* Toggle switch — solid indigo when active, with a subtle ring */
 
 /* Toggle switch — solid indigo when active, with a subtle ring */
 .skill-toggle {
@@ -999,39 +1052,37 @@ code, pre, kbd { font-family: var(--font-mono); }
   padding-right: var(--space-2);
 }
 
-/* ---- Right-side detail drawer — solid, with hairline divider ---- */
+/* ---- Right-side inspector drawer (V1): glass panel, no backdrop dim ---- */
 .detail-drawer-overlay {
   position: fixed;
   inset: 0;
   z-index: var(--z-drawer);
   display: flex;
   justify-content: flex-end;
-  background: rgb(var(--c-overlay) / 0.25);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  animation: overlay-in var(--duration-normal) var(--ease-fast);
-}
-
-.dark .detail-drawer-overlay {
-  background: rgb(0 0 0 / 0.45);
 }
 
 .detail-drawer {
   display: flex;
   flex-direction: column;
-  width: min(440px, 100%);
+  width: min(340px, 92%);
   height: 100%;
   min-height: 0;
   border-left: 1px solid rgb(var(--c-border));
-  background: rgb(var(--c-surface));
-  box-shadow: var(--shadow-xl);
-  animation: detail-drawer-in var(--duration-slow) var(--ease-fast);
+  background: rgb(var(--c-surface) / 0.94);
+  backdrop-filter: blur(30px) saturate(1.6);
+  -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  box-shadow: -18px 0 50px rgb(0 0 0 / 0.10), var(--mat-glass-highlight);
+  animation: detail-drawer-in 280ms cubic-bezier(0.32, 0.72, 0, 1);
   position: relative;
 }
 
+.dark .detail-drawer {
+  box-shadow: -18px 0 50px rgb(0 0 0 / 0.45), var(--mat-glass-highlight);
+}
+
 @keyframes detail-drawer-in {
-  from { transform: translateX(20px); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
+  from { transform: translateX(103%); }
+  to { transform: translateX(0); }
 }
 
 @keyframes modal-in {
@@ -1057,9 +1108,11 @@ code, pre, kbd { font-family: var(--font-mono); }
 .detail-drawer-title {
   margin: 0;
   color: rgb(var(--c-heading));
-  font-size: var(--text-sm);
-  font-weight: 650;
-  line-height: var(--leading-tight);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  word-break: break-all;
 }
 
 .detail-drawer-subtitle {
@@ -1075,16 +1128,7 @@ code, pre, kbd { font-family: var(--font-mono); }
   overflow-y: auto;
 }
 
-.detail-drawer-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-5);
-  border-top: 1px solid rgb(var(--c-border-subtle));
-  background: rgb(var(--c-surface-2) / 0.5);
-  flex-shrink: 0;
-}
+/* (V1) drawer footer removed — action buttons live in the header (V1 图2/图3) */
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(6px); }
@@ -1189,18 +1233,7 @@ code, pre, kbd { font-family: var(--font-mono); }
     border-radius: var(--radius-md);
   }
 
-  /* Table row selected state */
-  .row-selected {
-    background: rgb(var(--c-accent-soft) / 0.7) !important;
-  }
-  .row-selected-bar {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 3px;
-    background: rgb(var(--c-accent));
-  }
+  /* (V1) table-row selected state removed — .list-row--selected replaces it */
 
   /* Compact in-card empty state */
   .mini-empty {
@@ -1244,5 +1277,117 @@ code, pre, kbd { font-family: var(--font-mono); }
     font-size: 12px;
     line-height: 16px;
     font-weight: 550;
+  }
+
+  /* ---- Unified floating page bar (V6): one rounded glass pill per page ----
+     左＝标题（或搜索/视图切换），右＝次级链接 + 至多一个主按钮。
+     标题也可下放内容区（集合页），由 ContentTitle 承担。 */
+  .page-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    height: var(--height-page-bar);
+    margin: 10px 12px 0;
+    padding: 0 var(--space-2);
+    flex-shrink: 0;
+    border: 1px solid var(--mat-glass-border);
+    border-radius: 10px;
+    background: var(--mat-glass-bg);
+    backdrop-filter: blur(var(--mat-glass-blur)) saturate(var(--mat-glass-saturate));
+    -webkit-backdrop-filter: blur(var(--mat-glass-blur)) saturate(var(--mat-glass-saturate));
+    box-shadow: var(--mat-glass-highlight), var(--mat-glass-shadow);
+    z-index: var(--z-sticky);
+  }
+
+  .page-header__title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: rgb(var(--c-heading));
+    white-space: nowrap;
+  }
+
+  .page-header__subtitle {
+    font-size: 11px;
+    color: rgb(var(--c-faint));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .page-header__toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .page-header__spacer {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .page-header__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    flex-shrink: 0;
+  }
+
+  /* In-content page title (collection pages): h1 + meta line */
+  .page-content-title {
+    padding: 18px 24px 6px;
+  }
+  .page-content-title h1 {
+    font-size: var(--text-lg);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: rgb(var(--c-heading));
+    line-height: 1.2;
+  }
+  .page-content-title p {
+    margin-top: 3px;
+    font-size: 11px;
+    color: rgb(var(--c-faint));
+  }
+
+  /* Unified card grid: auto-fill so narrow windows never leave a blank half column */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+    gap: var(--space-3);
+  }
+
+  /* ---- Material: Liquid Glass (web approximation) ----
+     Chrome only: sidebar, rail, toolbar, inspector, floating controls.
+     Never wrap scroll content or dense cards in glass. */
+  .glass-panel {
+    background: var(--mat-glass-bg);
+    -webkit-backdrop-filter: blur(var(--mat-glass-blur)) saturate(var(--mat-glass-saturate));
+    backdrop-filter: blur(var(--mat-glass-blur)) saturate(var(--mat-glass-saturate));
+    border: 1px solid var(--mat-glass-border);
+    box-shadow: var(--mat-glass-highlight), var(--mat-glass-shadow);
+  }
+  .ambient-bg { background: var(--grad-ambient); }
+}
+
+/* Glass fallbacks: no backdrop-filter support, or user prefers opacity */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-panel,
+  .page-header,
+  .app-sidebar,
+  .skills-toolbar,
+  .detail-drawer { background: rgb(var(--c-bg-page)); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass-panel,
+  .page-header,
+  .app-sidebar,
+  .skills-toolbar,
+  .detail-drawer {
+    background: rgb(var(--c-bg-page));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }

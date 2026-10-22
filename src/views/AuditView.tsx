@@ -10,7 +10,6 @@ import {
   Lock,
   OctagonX,
   RefreshCw,
-  Search,
   ShieldCheck,
   Terminal,
   Trash2,
@@ -21,6 +20,7 @@ import { useSkillsStore } from "../stores/skills";
 import { useActivityStore } from "../stores/activity";
 import { useUiStore } from "../stores/ui";
 import { useToastStore } from "../stores/toast";
+import PageHeader from "../components/PageHeader";
 import { useT } from "../i18n";
 import type { AuditReport, Skill, SkillAuditSummary } from "../types";
 import { auditSkillsBatch, disconnectSkill, getSkillAudit, scanAll } from "../lib/tauri";
@@ -28,14 +28,12 @@ import { parseSharedDisconnectError } from "../lib/connectionConfirmation";
 import {
   auditRiskRank,
   auditStats,
-  auditVerdictMeta,
-  averageAuditScore,
   mergeFindings,
   ruleExplanation,
-  scoreGradeMeta,
 } from "../lib/skillAudit";
 import { formatAuditTime } from "../lib/auditTime";
 import DetailDrawer from "../components/DetailDrawer";
+import SearchInput from "../components/SearchInput";
 import AuditRulesDialog from "../components/AuditRulesDialog";
 import ConnectionConfirmationDialog from "../components/ConnectionConfirmationDialog";
 import SkillDeleteDialog from "../components/SkillDeleteDialog";
@@ -62,13 +60,6 @@ export default function AuditView() {
   const setAuditFocusSkillId = useUiStore((s) => s.setAuditFocusSkillId);
 
   const stats = useMemo(() => auditStats(skills), [skills]);
-  const overallScore = useMemo(() => averageAuditScore(skills), [skills]);
-  const overallGrade = scoreGradeMeta(overallScore);
-  const lastCheckTime = useMemo(() => {
-    const times = Object.values(summaries).map((summary) => summary.created_at);
-    if (times.length === 0) return null;
-    return formatAuditTime(times.reduce((latest, current) => (current > latest ? current : latest)));
-  }, [summaries]);
 
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -210,7 +201,7 @@ export default function AuditView() {
   // ===================== 空态引导 =====================
   if (skills.length === 0) {
     return (
-      <div className="flex-1 overflow-y-auto bg-page" data-testid="audit-view">
+      <div className="flex-1 overflow-y-auto" data-testid="audit-view">
         <div className="max-w-[640px] mx-auto text-center pt-12">
           <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300 flex items-center justify-center mx-auto">
             <ShieldCheck size={26} />
@@ -234,92 +225,36 @@ export default function AuditView() {
     );
   }
 
-  const conclusion =
-    stats.block > 0
-      ? t("safety.conclusionDanger", { danger: stats.block, warn: stats.warn })
-      : stats.warn > 0
-        ? t("safety.conclusionWarn", { warn: stats.warn })
-        : stats.pending > 0
-          ? t("safety.conclusionPending", { count: stats.pending })
-          : t("safety.conclusionClean");
-
   return (
     <div className="flex-1 flex flex-col overflow-hidden" data-testid="audit-view">
-      {/* 页头 */}
-      <div className="flex items-start gap-3 px-6 py-3 border-b border-border bg-surface">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-content dark:text-heading">{t("safety.title")}</h2>
-          <p className="text-2xs text-faint mt-0.5">{t("safety.desc")}</p>
-        </div>
-        <div className="flex items-center gap-2 ml-auto shrink-0">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRulesOpen(true)}>
-            <Info size={13} /> {t("safety.rulesBtn")}
-          </button>
-          <button type="button" className="btn btn-primary btn-sm" onClick={() => runBatch(null)} disabled={auditing}>
-            {auditing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-            {auditing ? t("safety.checking") : t("safety.recheckAll")}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title={t("safety.title")}
+        subtitle={t("safety.desc")}
+        actions={
+          <>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRulesOpen(true)}>
+              <Info size={13} /> {t("safety.rulesBtn")}
+            </button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => runBatch(null)} disabled={auditing}>
+              {auditing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+              {auditing ? t("safety.checking") : t("safety.recheckAll")}
+            </button>
+          </>
+        }
+      />
 
-      <div className="flex-1 overflow-y-auto bg-page p-4 space-y-3">
-        {/* 健康总览 */}
-        <div className="card p-4 flex items-center gap-5">
-          <div className="shrink-0 text-center">
-            <div className="text-3xl font-bold font-mono text-heading leading-none">
-              {overallScore ?? "—"}
-            </div>
-            <div className="text-2xs text-faint mt-1">
-              {overallScore == null
-                ? t("safety.noScore")
-                : t("safety.scoreGrade", { grade: overallGrade?.label ?? "" })}
-            </div>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              {overallGrade && (
-                <span className={"text-2xs px-2 py-0.5 rounded-md font-medium " + overallGrade.badge}>
-                  {overallGrade.label}
-                </span>
-              )}
-              {lastCheckTime && (
-                <span className="text-2xs text-faint">{t("safety.lastCheck", { time: lastCheckTime })}</span>
-              )}
-            </div>
-            <p className="text-xs text-content leading-relaxed mt-1.5">{conclusion}</p>
-            {stats.block > 0 && (
-              <button
-                type="button"
-                className="btn btn-danger btn-sm mt-2"
-                onClick={() => setFilter("block")}
-              >
-                {t("safety.viewDanger")} <ChevronDown size={12} />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* 状态统计卡：即筛选入口（点卡片切对应状态，再点「全部」恢复） */}
-        <div className="grid grid-cols-5 gap-2.5">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {/* 状态统计卡：即筛选入口（V6 p3：危险/需留意/未检查/安全 四态，点卡片筛选，再点恢复全部） */}
+        <div className="grid grid-cols-4 gap-2.5">
           <StatCard
-            testId="safety-stat-all"
-            icon={<ShieldCheck size={13} />}
-            tone="pending"
-            active={filter === "all"}
-            label={t("safety.statAll")}
-            count={skills.length}
-            desc={t("safety.statAllDesc")}
-            onClick={() => setFilter("all")}
-          />
-          <StatCard
-            testId="safety-stat-pass"
-            icon={<Check size={13} />}
-            tone="pass"
-            active={filter === "pass"}
-            label={t("safety.statPass")}
-            count={stats.pass}
-            desc={t("safety.statPassDesc")}
-            onClick={() => setFilter("pass")}
+            testId="safety-stat-block"
+            icon={<OctagonX size={13} />}
+            tone="block"
+            active={filter === "block"}
+            label={t("safety.statBlock")}
+            count={stats.block}
+            desc={t("safety.statBlockDesc")}
+            onClick={() => setFilter(filter === "block" ? "all" : "block")}
           />
           <StatCard
             testId="safety-stat-warn"
@@ -329,17 +264,7 @@ export default function AuditView() {
             label={t("safety.statWarn")}
             count={stats.warn}
             desc={t("safety.statWarnDesc")}
-            onClick={() => setFilter("warn")}
-          />
-          <StatCard
-            testId="safety-stat-block"
-            icon={<OctagonX size={13} />}
-            tone="block"
-            active={filter === "block"}
-            label={t("safety.statBlock")}
-            count={stats.block}
-            desc={t("safety.statBlockDesc")}
-            onClick={() => setFilter("block")}
+            onClick={() => setFilter(filter === "warn" ? "all" : "warn")}
           />
           <StatCard
             testId="safety-stat-pending"
@@ -349,34 +274,38 @@ export default function AuditView() {
             label={t("safety.statPending")}
             count={stats.pending}
             desc={t("safety.statPendingDesc")}
-            onClick={() => setFilter("pending")}
+            onClick={() => setFilter(filter === "pending" ? "all" : "pending")}
+          />
+          <StatCard
+            testId="safety-stat-pass"
+            icon={<Check size={13} />}
+            tone="pass"
+            active={filter === "pass"}
+            label={t("safety.statPass")}
+            count={stats.pass}
+            desc={t("safety.statPassDesc")}
+            onClick={() => setFilter(filter === "pass" ? "all" : "pass")}
           />
         </div>
 
-        {/* 搜索 */}
-        <div className="flex items-center gap-2">
-          <div className="flex-1" />
-          <div className="relative w-60">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t("safety.searchPlaceholder")}
-              className="input pl-8"
-            />
+        {/* 技能列表（按风险排序，V6 p3）：搜索在列表分组行 */}
+        <div data-testid="safety-rows">
+          <div className="flex items-center gap-2 mb-2">
+            <SearchInput value={query} onChange={setQuery} placeholder={t("safety.searchPlaceholder")} />
+            {(filter === "all" || filter === "block") && stats.block > 0 && (
+              <button type="button" className="btn btn-ghost btn-sm text-red-500 hover:text-red-600 ml-auto" onClick={() => setFilter("block")}>
+                {t("safety.viewDanger")}
+              </button>
+            )}
           </div>
-        </div>
-
-        {/* 技能列表（按风险排序） */}
-        {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-faint">
-            <ShieldCheck size={40} className="opacity-30" />
-            <p className="text-sm mt-2">{t("safety.noMatch")}</p>
-          </div>
-        ) : (
-          <div className="space-y-2" data-testid="safety-rows">
+          {filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-faint">
+              <ShieldCheck size={40} className="opacity-30" />
+              <p className="text-sm mt-2">{t("safety.noMatch")}</p>
+            </div>
+          ) : (
+          <div className="list-panel">
             {filtered.map((skill) => {
-              const verdictMeta = auditVerdictMeta(skill.audit_verdict);
               const summary = summaries[skill.id];
               const summaryLine =
                 skill.audit_verdict === "block"
@@ -393,38 +322,31 @@ export default function AuditView() {
                 <div
                   key={skill.id}
                   onClick={() => openReport(skill.id)}
-                  className={
-                    "card px-4 py-3 flex items-center gap-3.5 cursor-pointer hover:shadow-md transition-shadow " +
-                    (isDanger
-                      ? "border-l-2 border-l-red-500 dark:border-l-red-400"
-                      : isWarn
-                        ? "border-l-2 border-l-amber-500 dark:border-l-amber-400"
-                        : "")
-                  }
+                  className="px-4 py-2.5 flex items-center gap-3.5 cursor-pointer border-b border-border-subtle last:border-b-0 transition-colors hover:bg-surface-hover"
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold text-heading truncate">{skill.name}</span>
-                      {verdictMeta ? (
-                        <span className={"text-2xs px-2 py-0.5 rounded-md font-medium shrink-0 " + verdictMeta.badge}>
-                          {verdictMeta.label}
-                        </span>
-                      ) : (
-                        <span className="text-2xs px-2 py-0.5 rounded-md bg-surface-2 text-faint shrink-0">
-                          {t("safety.statPending")}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-2xs text-muted mt-0.5">{summaryLine}</div>
-                    <div className="text-2xs text-faint mt-0.5">
-                      {checkedAt
-                        ? t("safety.rowCheckedAt", { lib: skill.source_lib, time: checkedAt })
-                        : t("safety.rowSource", { lib: skill.source_lib })}
-                    </div>
-                  </div>
+                  <span
+                    className={
+                      "text-sm font-semibold shrink-0 max-w-[180px] truncate " +
+                      (isDanger
+                        ? "text-red-600 dark:text-red-300"
+                        : isWarn
+                          ? "text-amber-600 dark:text-amber-300"
+                          : skill.audit_verdict === "pass"
+                            ? "text-emerald-600 dark:text-emerald-300"
+                            : "text-heading")
+                    }
+                  >
+                    {skill.name}
+                  </span>
+                  <span className="text-2xs text-muted truncate min-w-0 flex-1">
+                    {summaryLine}
+                    {checkedAt
+                      ? " · " + t("safety.rowCheckedAt", { lib: skill.source_lib, time: checkedAt })
+                      : " · " + t("safety.rowSource", { lib: skill.source_lib })}
+                  </span>
                   <div className="flex items-center gap-2 shrink-0" onClick={(event) => event.stopPropagation()}>
                     {isDanger && (
-                      <button type="button" className="btn btn-danger btn-sm" onClick={() => openReport(skill.id)}>
+                      <button type="button" className="btn btn-ghost btn-sm text-red-500 hover:text-red-600" onClick={() => openReport(skill.id)}>
                         {t("safety.rowHandle")}
                       </button>
                     )}
@@ -438,17 +360,14 @@ export default function AuditView() {
                         <RefreshCw size={12} /> {t("safety.rowCheck")}
                       </button>
                     )}
-                    {skill.audit_verdict != null && !isDanger && (
-                      <button type="button" className="btn btn-outline btn-sm" onClick={() => openReport(skill.id)}>
-                        {t("safety.rowDetail")}
-                      </button>
-                    )}
+                    <ChevronRight size={14} className="list-row__chev" />
                   </div>
                 </div>
               );
             })}
           </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* 详情抽屉 */}
@@ -459,6 +378,51 @@ export default function AuditView() {
         icon={<ShieldCheck size={18} className="text-faint shrink-0" />}
         title={selectedSkill?.name ?? ""}
         subtitle={selectedSkill?.source_lib}
+        headerActions={
+          selectedSkill && (
+            <>
+              {selectedSkill.links.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => disconnectAll(selectedSkill)}
+                  className="btn-icon rounded-full bg-surface-2 text-red-500 hover:text-red-600"
+                  title={t("safety.drawerDisconnect")}
+                  aria-label={t("safety.drawerDisconnect")}
+                >
+                  <Unlink size={14} />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() =>
+                  useSkillsStore.getState().requestSkillDelete({
+                    id: selectedSkill.id,
+                    name: selectedSkill.name,
+                    path: selectedSkill.path,
+                  })
+                }
+                className="btn-icon rounded-full bg-surface-2 text-red-500 hover:text-red-600"
+                title={t("safety.drawerDelete")}
+                aria-label={t("safety.drawerDelete")}
+              >
+                <Trash2 size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await runBatch([selectedSkill.id]);
+                  await openReport(selectedSkill.id);
+                }}
+                disabled={auditing}
+                className="btn-icon rounded-full bg-surface-2"
+                title={t("safety.drawerRecheck")}
+                aria-label={t("safety.drawerRecheck")}
+              >
+                <RefreshCw size={14} className={auditing ? "animate-spin" : ""} />
+              </button>
+            </>
+          )
+        }
       >
         {loadingReport || !selectedReport ? (
           <div className="flex items-center justify-center py-10 text-faint">
@@ -468,23 +432,10 @@ export default function AuditView() {
           <SafetyDrawerBody
             skill={selectedSkill}
             report={selectedReport}
-            auditing={auditing}
             expandedFindings={expandedFindings}
             onToggleFinding={(key) =>
               setExpandedFindings((current) => ({ ...current, [key]: !current[key] }))
             }
-            onDisconnectAll={() => disconnectAll(selectedSkill)}
-            onDelete={() =>
-              useSkillsStore.getState().requestSkillDelete({
-                id: selectedSkill.id,
-                name: selectedSkill.name,
-                path: selectedSkill.path,
-              })
-            }
-            onRecheck={async () => {
-              await runBatch([selectedSkill.id]);
-              await openReport(selectedSkill.id);
-            }}
           />
         ) : null}
       </DetailDrawer>
@@ -520,7 +471,7 @@ const STAT_TONE_CLASSES = {
   pass: "text-emerald-600 dark:text-emerald-300",
   warn: "text-amber-600 dark:text-amber-300",
   block: "text-red-600 dark:text-red-300",
-  pending: "text-muted",
+  pending: "text-amber-600 dark:text-amber-300",
 } as const;
 
 function StatCard({
@@ -561,25 +512,16 @@ function StatCard({
 function SafetyDrawerBody({
   skill,
   report,
-  auditing,
   expandedFindings,
   onToggleFinding,
-  onDisconnectAll,
-  onDelete,
-  onRecheck,
 }: {
   skill: Skill;
   report: AuditReport;
-  auditing: boolean;
   expandedFindings: Record<string, boolean>;
   onToggleFinding: (key: string) => void;
-  onDisconnectAll: () => void;
-  onDelete: () => void;
-  onRecheck: () => void;
 }) {
   const t = useT();
   const verdict = report.verdict;
-  const hasLinks = skill.links.length > 0;
 
   const bannerTone =
     verdict === "block"
@@ -672,39 +614,6 @@ function SafetyDrawerBody({
       {findings.length === 0 && (
         <p className="text-2xs text-faint">{t("safety.drawerNoFindings")}</p>
       )}
-
-      <div>
-        <div className="text-2xs font-semibold text-muted uppercase tracking-wider mb-2">
-          {t("safety.drawerAdvice")}
-        </div>
-        <div className="card p-3.5">
-          {verdict !== "pass" && (
-            <div className="text-2xs text-muted mb-2.5 leading-relaxed">
-              {verdict === "block" ? t("safety.drawerAdviceOrder") : null}
-            </div>
-          )}
-          <div className="flex flex-col gap-2">
-            {hasLinks ? (
-              <button type="button" className="btn btn-danger btn-sm" onClick={onDisconnectAll}>
-                <Unlink size={13} /> {t("safety.drawerDisconnect")}
-              </button>
-            ) : (
-              verdict !== "pass" && (
-                <p className="text-2xs text-faint leading-relaxed">{t("safety.drawerDisconnectNone")}</p>
-              )
-            )}
-            <button type="button" className="btn btn-outline btn-sm" onClick={onDelete}>
-              <Trash2 size={13} /> {t("safety.drawerDelete")}
-            </button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onRecheck} disabled={auditing}>
-              <RefreshCw size={13} /> {t("safety.drawerRecheck")}
-            </button>
-          </div>
-        </div>
-        {hasLinks && verdict !== "pass" && (
-          <p className="text-2xs text-faint mt-2 leading-relaxed">{t("safety.drawerReassure")}</p>
-        )}
-      </div>
     </div>
   );
 }

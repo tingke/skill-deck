@@ -1,12 +1,15 @@
 import { useState, useEffect, useMemo } from "react";
 import { useExtensionsStore } from "../stores/extensions";
 import { togglePlugin, deleteExt, extConfigPath } from "../lib/tauri";
-import { Package as PackageIcon } from "lucide-react";
+import { Package as PackageIcon, Search } from "lucide-react";
 import type { ExtensionRow } from "../types";
-import { ExtRow } from "../components/ExtList";
+import { ExtRow, ExtCard } from "../components/ExtList";
+import ViewToggle from "../components/ViewToggle";
 import { EmptyState } from "./MCPView";
 import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
+import PageHeader, { ContentTitle } from "../components/PageHeader";
+import SearchInput from "../components/SearchInput";
 
 const toast = () => useToastStore.getState();
 
@@ -17,6 +20,12 @@ export default function PluginsView() {
   const extensions = useMemo(
     () => allExtensions.filter((e) => e.kind === "plugin"),
     [allExtensions],
+  );
+  const [query, setQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+  const visible = useMemo(
+    () => extensions.filter((e) => e.name.toLowerCase().includes(query.trim().toLowerCase())),
+    [extensions, query],
   );
   const extIds = extensions.map((e) => e.id).join(",");
   const [paths, setPaths] = useState<Record<string, string>>({});
@@ -62,19 +71,30 @@ export default function PluginsView() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex items-center gap-3 px-6 py-3 border-b border-border bg-surface">
-        <h2 className="text-sm font-semibold text-content dark:text-heading">{t("plugins.title")}</h2>
-        <span className="text-[13px] text-faint">{t("plugins.desc")}</span>
-        <div className="flex items-center gap-2 ml-auto">
-        </div>
-      </div>
+      <PageHeader
+        toolbar={
+          <>
+            <ViewToggle mode={viewMode} onChange={setViewMode} />
+            <SearchInput value={query} onChange={setQuery} placeholder={t("plugins.search")} />
+          </>
+        }
+      />
 
-      <div className="flex-1 overflow-y-auto bg-page p-4">
+      <div className="flex-1 overflow-y-auto">
+        <ContentTitle title={t("plugins.title")} meta={t("plugins.desc")} />
         {extensions.length === 0 ? (
           <EmptyState icon={<PackageIcon size={40} />} text={t("plugins.empty")} hint={t("plugins.emptyHint")} />
+        ) : visible.length === 0 ? (
+          <EmptyState icon={<Search size={40} />} text={t("plugins.noMatch")} hint={t("plugins.noMatchHint")} />
+        ) : viewMode === "grid" ? (
+          <div className="px-6 pb-6 card-grid">
+            {visible.map((ext) => (
+              <ExtCard key={ext.id} ext={ext} kindPath={paths[ext.id]} onToggle={() => handleToggle(ext)} onDelete={() => handleDelete(ext)} />
+            ))}
+          </div>
         ) : (
-          <div className="space-y-1.5">
-            {extensions.map((ext) => (
+          <div className="list-panel mx-6 mb-6">
+            {visible.map((ext) => (
               <ExtRow key={ext.id} ext={ext} kindPath={paths[ext.id]} onToggle={() => handleToggle(ext)} onDelete={() => handleDelete(ext)} />
             ))}
           </div>

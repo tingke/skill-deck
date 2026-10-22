@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useAssetsStore } from "../stores/assets";
 import { savePrompt, deletePrompt, saveRule } from "../lib/tauri";
 import { Plus, Trash2, X, Search, FileText, Copy, Check, ScrollText, Edit3 } from "lucide-react";
@@ -8,6 +8,11 @@ import { useT } from "../i18n";
 import { useDeleteConfirmation } from "../lib/deleteConfirmation";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
 import DetailDrawer from "../components/DetailDrawer";
+import PageHeader, { ContentTitle } from "../components/PageHeader";
+import SearchInput from "../components/SearchInput";
+import ViewToggle from "../components/ViewToggle";
+import { ChevronRight } from "lucide-react";
+import { EmptyState } from "./MCPView";
 
 const toast = () => useToastStore.getState();
 
@@ -15,8 +20,10 @@ export default function PromptsView() {
   const t = useT();
   const { prompts, loadPrompts, loadRules } = useAssetsStore();
   const [query, setQuery] = useState("");
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [editing, setEditing] = useState<Prompt | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const deleteConfirmation = useDeleteConfirmation();
   const detailPrompt = detailId ? prompts.find((p) => p.id === detailId) ?? null : null;
@@ -39,48 +46,102 @@ export default function PromptsView() {
     toast().show(t("prompts.appliedToRule", { platform }));
  };
 
-  const filtered = prompts.filter(
-    (p) =>
-      p.title.toLowerCase().includes(query.toLowerCase()) ||
-      p.content.toLowerCase().includes(query.toLowerCase()),
+  const allTags = useMemo(
+    () => [...new Set(prompts.flatMap((p) => p.tags))].sort((a, b) => a.localeCompare(b)),
+    [prompts],
+  );
+
+  const filtered = useMemo(
+    () =>
+      prompts.filter(
+        (p) =>
+          (selectedTag === null || p.tags.includes(selectedTag)) &&
+          (p.title.toLowerCase().includes(query.toLowerCase()) ||
+            p.content.toLowerCase().includes(query.toLowerCase())),
+      ),
+    [prompts, query, selectedTag],
   );
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-     <div className="flex items-center gap-3 px-6 py-3 border-b border-border bg-surface">
-       <div className="relative flex-1 max-w-md">
-          <Search size={14} className="absolute left-3 top-2.5 text-faint" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("prompts.search")}
-          className="w-full pl-9 pr-3 py-1.5 text-sm border border-border rounded-lg focus:outline-none focus:border-border-strong"
-        />
-      </div>
-       <div className="flex items-center gap-2 ml-auto">
-         <button
-           onClick={() => setEditing({ id: 0, title: "", content: "", tags: [], source: "manual" })}
+      <PageHeader
+        toolbar={
+          <>
+            <ViewToggle mode={viewMode} onChange={setViewMode} />
+            <SearchInput value={query} onChange={setQuery} placeholder={t("prompts.search")} />
+            {allTags.length > 0 && (
+              <select
+                value={selectedTag ?? ""}
+                onChange={(e) => setSelectedTag(e.target.value || null)}
+                className="input w-[140px] shrink-0"
+                aria-label={t("prompts.filterAll")}
+                title={t("prompts.filterAll")}
+              >
+                <option value="">{t("prompts.filterAll")}</option>
+                {allTags.map((tag) => (
+                  <option key={tag} value={tag}>{tag}</option>
+                ))}
+              </select>
+            )}
+          </>
+        }
+        actions={
+          <button
+            onClick={() => setEditing({ id: 0, title: "", content: "", tags: [], source: "manual" })}
             className="btn btn-primary"
           >
             <Plus size={14} /> {t("prompts.newTitle")}
           </button>
-       </div>
-     </div>
+        }
+      />
 
-     <div className="flex-1 overflow-y-auto bg-page">
+     <div className="flex-1 overflow-y-auto">
+        <ContentTitle title={t("prompts.title")} meta={t("prompts.desc")} />
         {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-faint">
-            <FileText size={40} />
-            <p className="text-sm mt-2">{t("prompts.empty")}</p>
+          prompts.length === 0 ? (
+            <EmptyState
+              icon={<FileText size={40} />}
+              text={t("prompts.empty")}
+              hint={t("prompts.emptyDesc")}
+              action={
+                <button
+                  onClick={() => setEditing({ id: 0, title: "", content: "", tags: [], source: "manual" })}
+                  className="btn btn-primary"
+                >
+                  <Plus size={14} /> {t("prompts.newTitle")}
+                </button>
+              }
+            />
+          ) : (
+            <EmptyState
+              icon={<Search size={40} />}
+              text={t("prompts.noMatch")}
+              hint={t("prompts.noMatchHint")}
+            />
+          )
+        ) : viewMode === "list" ? (
+          <div className="list-panel mx-6 mb-6">
+            {filtered.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setDetailId(p.id)}
+                className={"list-row list-row--generic" + (detailId === p.id ? " list-row--selected" : "")}
+              >
+                <span className="list-row__name">{p.title}</span>
+                <span className="list-row__desc font-mono">{p.content}</span>
+                <span className="text-2xs text-faint shrink-0">{p.tags.length > 0 ? p.tags.join(" · ") : ""}</span>
+                <ChevronRight size={14} className="list-row__chev" />
+              </button>
+            ))}
           </div>
         ) : (
-          <div className="p-4 grid grid-cols-2 gap-3">
+          <div className="px-6 pb-6 pt-1 card-grid">
            {filtered.map((p) => (
               <div key={p.id} onClick={() => setDetailId(p.id)} className="card p-4 cursor-pointer hover:border-border-strong hover:shadow-sm transition-all">
                 <div className="flex items-start justify-between">
                   <h3 className="text-sm font-semibold text-heading truncate">{p.title}</h3>
                 </div>
-                <p className="text-xs text-faint mt-1.5 line-clamp-3">{p.content}</p>
+                <p className="text-xs text-faint font-mono mt-1.5 line-clamp-2">{p.content}</p>
                 {p.tags.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-2">
                     {p.tags.map((tag) => (
@@ -128,10 +189,11 @@ export default function PromptsView() {
                   setCopiedId(detailPrompt.id);
                   setTimeout(() => setCopiedId(null), 1500);
                 }}
-                className="btn btn-outline"
+                className="btn-icon rounded-full bg-surface-2"
+                title={copiedId === detailPrompt.id ? t("common.copied") : t("common.copyAll")}
+                aria-label={t("common.copyAll")}
               >
                 {copiedId === detailPrompt.id ? <Check size={14} /> : <Copy size={14} />}
-                {copiedId === detailPrompt.id ? t("common.copied") : t("common.copyAll")}
               </button>
               <button
                 onClick={() =>
@@ -139,19 +201,27 @@ export default function PromptsView() {
                     toast().show(t("prompts.applyToRuleFailed", { msg: String(err) }), "error");
                   })
                 }
-                className="btn btn-outline"
+                className="btn-icon rounded-full bg-surface-2"
                 title={t("prompts.applyToRule")}
+                aria-label={t("prompts.applyToRule")}
               >
-                <ScrollText size={14} /> {t("prompts.applyToRule")}
+                <ScrollText size={14} />
               </button>
-              <button onClick={() => setEditing(detailPrompt)} className="btn btn-primary ml-auto">
-                <Edit3 size={14} /> {t("common.edit")}
+              <button
+                onClick={() => setEditing(detailPrompt)}
+                className="btn-icon rounded-full bg-surface-2"
+                title={t("common.edit")}
+                aria-label={t("common.edit")}
+              >
+                <Edit3 size={14} />
               </button>
               <button
                 onClick={() => deleteConfirmation.request(detailPrompt.title, () => handleDelete(detailPrompt.id))}
-                className="btn btn-ghost text-red-500"
+                className="btn-icon rounded-full bg-surface-2 text-red-500 hover:text-red-600"
+                title={t("common.delete")}
+                aria-label={t("common.delete")}
               >
-                <Trash2 size={14} /> {t("common.delete")}
+                <Trash2 size={14} />
               </button>
             </>
           )

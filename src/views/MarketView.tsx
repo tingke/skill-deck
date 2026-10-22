@@ -43,6 +43,7 @@ import { useActivityStore } from "../stores/activity";
 import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
 import { useMarketplaceStore } from "../stores/marketplace";
+import PageHeader from "../components/PageHeader";
 
 const toast = () => useToastStore.getState();
 
@@ -110,28 +111,24 @@ export default function MarketView() {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }, [catalog]);
 
+  const handleBrowse = () => {
+    if (sourceMode !== "registry") setSourceMode("registry");
+    syncMarket();
+  };
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden" data-testid="market-view">
-      {!catalog ? (
-        <EmptyMarket
-          syncing={syncing}
-          onBrowse={() => {
-            if (sourceMode !== "registry") setSourceMode("registry");
-            syncMarket();
-          }}
-          onUseCustom={(url) => {
-            setManifestUrl(url);
-            setSourceMode("custom");
-          }}
-        />
-      ) : (
-        <>
-          <div className="flex items-start gap-3 px-6 py-3 border-b border-border bg-surface">
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-content dark:text-heading">{t("market.title")}</h2>
-              <p className="text-2xs text-faint mt-0.5">{t("market.desc")}</p>
-            </div>
-            <div className="flex items-center gap-2 ml-auto shrink-0">
+      <PageHeader
+        title={t("market.title")}
+        subtitle={t("market.desc")}
+        actions={
+          !catalog ? (
+            <button type="button" className="btn btn-primary" onClick={handleBrowse} disabled={syncing}>
+              {syncing ? <Loader2 size={14} className="animate-spin" /> : null}
+              {t("market.emptyBrowse")} <ArrowRight size={14} />
+            </button>
+          ) : (
+            <>
               <div className="flex items-center rounded-lg border border-border overflow-hidden">
                 <button
                   type="button"
@@ -152,8 +149,19 @@ export default function MarketView() {
                 {syncing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
                 {syncing ? t("market.syncing") : t("market.refresh")}
               </button>
-            </div>
-          </div>
+            </>
+          )
+        }
+      />
+      {!catalog ? (
+        <EmptyMarket
+          onUseCustom={(url) => {
+            setManifestUrl(url);
+            setSourceMode("custom");
+          }}
+        />
+      ) : (
+        <>
 
           <div className="border-b border-border-subtle bg-surface px-6 py-3 space-y-3">
             {sourceMode === "custom" && (
@@ -200,7 +208,7 @@ export default function MarketView() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto bg-page p-4">
+          <div className="flex-1 overflow-y-auto p-4">
             {filtered.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-faint">
                 <Search size={40} className="opacity-30" />
@@ -249,12 +257,8 @@ export default function MarketView() {
 // ===================== 空态引导 =====================
 
 function EmptyMarket({
-  syncing,
-  onBrowse,
   onUseCustom,
 }: {
-  syncing: boolean;
-  onBrowse: () => void;
   onUseCustom: (url: string) => void;
 }) {
   const t = useT();
@@ -262,7 +266,7 @@ function EmptyMarket({
   const [addingCustom, setAddingCustom] = useState(false);
 
   return (
-    <div className="flex-1 overflow-y-auto bg-page">
+    <div className="flex-1 overflow-y-auto">
       <div className="max-w-[620px] mx-auto text-center pt-14">
         <div className="w-14 h-14 rounded-2xl bg-accent-soft text-accent flex items-center justify-center mx-auto">
           <Store size={26} />
@@ -287,13 +291,7 @@ function EmptyMarket({
           </div>
         </div>
 
-        <div className="mt-5">
-          <button type="button" className="btn btn-primary btn-lg" onClick={onBrowse} disabled={syncing}>
-            {syncing ? <Loader2 size={14} className="animate-spin" /> : null}
-            {t("market.emptyBrowse")} <ArrowRight size={14} />
-          </button>
-          <p className="text-2xs text-faint mt-2.5 leading-relaxed">{t("market.emptyPrivacy")}</p>
-        </div>
+        <p className="text-2xs text-faint mt-5 leading-relaxed">{t("market.emptyPrivacy")}</p>
 
         <div className="mt-5 pb-10">
           {!addingCustom ? (
@@ -976,13 +974,14 @@ function McpInstallDialog({
               {entry.required_inputs.map((input) => (
                 <label key={input.name} className="block space-y-1">
                   <span className="text-2xs font-medium text-muted">{input.description || input.name}</span>
+                  {/* 密钥输入用 CSS 掩码（-webkit-text-security，WKWebView/Chromium 均支持），不再使用 type="password" */}
                   <input
-                    type={input.is_secret ? "password" : "text"}
+                    type="text"
                     value={values[input.name] ?? ""}
                     onChange={(event) => setValues((current) => ({ ...current, [input.name]: event.target.value }))}
                     placeholder={input.placeholder || t("market.toolInputPlaceholder", { name: input.name })}
                     autoComplete="off"
-                    className="input"
+                    className={"input" + (input.is_secret ? " [-webkit-text-security:disc]" : "")}
                   />
                 </label>
               ))}

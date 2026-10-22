@@ -1,14 +1,18 @@
 import { useUiStore } from "../stores/ui";
 import { useSkillsStore } from "../stores/skills";
 import { useActivityStore } from "../stores/activity";
+import { useWorkspaceStore } from "../stores/workspace";
+import { useExtensionsStore } from "../stores/extensions";
 import {
   BookOpen, Link2, RefreshCw, Link, Unlink, FileDown,
   Power, ArchiveRestore, Package, Cpu, FolderTree, ScrollText,
   FolderKanban, Server, Webhook, Trash2, Clock, Radio, ListTodo,
+  CheckCircle2,
 } from "lucide-react";
 import { AGENT_COLORS } from "../types";
 import type { ActivityLog } from "../types";
 import { useT } from "../i18n";
+import PageHeader from "../components/PageHeader";
 import type { TranslationKey } from "../i18n";
 import { AgentGlyph } from "../components/AgentGlyph";
 
@@ -128,10 +132,48 @@ function activityDetail(action: string, detail: string, t: (k: TranslationKey, v
   return detail;
 }
 
+/**
+ * i18n keys introduced by the dashboard redesign. zh/en values are listed in the
+ * delivery report and must be added to src/i18n/zh.ts and src/i18n/en.ts by the
+ * parent agent (i18n files are out of this task's scope). Until a key lands,
+ * t() falls back to the raw key string; the double cast only keeps TS strict
+ * green because TranslationKey is `keyof typeof zh` and cannot be extended here.
+ */
+type NewDashboardKey =
+  | "dashboard.metricSkills"
+  | "dashboard.metricLinks"
+  | "dashboard.metricAgents"
+  | "dashboard.metricTools"
+  | "dashboard.todoTitle"
+  | "dashboard.todoUnlinked"
+  | "dashboard.todoUnlinkedSub"
+  | "dashboard.todoNoSkills"
+  | "dashboard.todoNoSkillsSub"
+  | "dashboard.todoGoMarket"
+  | "dashboard.todoAllSet"
+  | "dashboard.todoAllSetSub"
+  | "dashboard.matrixTitle"
+  | "dashboard.matrixColSkills"
+  | "dashboard.matrixColPlugins"
+  | "dashboard.matrixColHooks"
+  | "dashboard.matrixEmpty";
+const asKey = (key: NewDashboardKey): TranslationKey => key as string as TranslationKey;
+
+type TodoAction = {
+  key: string;
+  main: string;
+  sub: string;
+  button?: { label: string; onClick: () => void };
+};
+
 export default function DashboardView() {
   const t = useT();
   const { skills, agentOptions } = useSkillsStore();
+  const globalScan = useSkillsStore((s) => s.globalScan);
+  const globalScanning = useSkillsStore((s) => s.globalScanning);
   const { activity, agentActivity: activitySnapshot } = useActivityStore();
+  const agents = useWorkspaceStore((s) => s.agents);
+  const extensions = useExtensionsStore((s) => s.extensions);
   const setView = useUiStore((s) => s.setView);
 
   const activityStateColor = (state: string) => {
@@ -141,14 +183,140 @@ export default function DashboardView() {
     return "bg-slate-400 dark:bg-slate-500";
   };
 
-  return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="mb-5 flex items-baseline gap-3">
-        <h2 className="text-lg font-bold tracking-tight">{t("dashboard.title")}</h2>
-        <span className="text-2xs text-faint">实时面板</span>
-      </div>
+  const linkCount = skills.reduce((n, s) => n + s.links.length, 0);
 
-      <div className="grid grid-cols-2 gap-3">
+  const metrics = [
+    { label: t(asKey("dashboard.metricSkills")), value: skills.length },
+    { label: t(asKey("dashboard.metricLinks")), value: linkCount },
+    { label: t(asKey("dashboard.metricAgents")), value: agents.length },
+    { label: t(asKey("dashboard.metricTools")), value: extensions.length },
+  ];
+
+  // Priority: a) one row per enabled agent without any linked skill, then
+  // b) no skills at all; rows are capped at 3; c) otherwise a single all-set row.
+  const todoActions: TodoAction[] = agents
+    .filter((a) => a.enabled && !skills.some((s) => s.links.includes(a.id)))
+    .map((a) => ({
+      key: `unlinked-${a.id}`,
+      main: t(asKey("dashboard.todoUnlinked"), { label: a.label }),
+      sub: t(asKey("dashboard.todoUnlinkedSub")),
+      button: { label: t("dashboard.goSkills"), onClick: () => setView("skills") },
+    }));
+  if (skills.length === 0) {
+    todoActions.push({
+      key: "no-skills",
+      main: t(asKey("dashboard.todoNoSkills")),
+      sub: t(asKey("dashboard.todoNoSkillsSub")),
+      button: { label: t(asKey("dashboard.todoGoMarket")), onClick: () => setView("market") },
+    });
+  }
+  if (todoActions.length === 0) {
+    todoActions.push({
+      key: "all-set",
+      main: t(asKey("dashboard.todoAllSet")),
+      sub: t(asKey("dashboard.todoAllSetSub")),
+    });
+  }
+  const actions = todoActions.slice(0, 3);
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <PageHeader
+        title={t("dashboard.title")}
+        subtitle={t("dashboard.realtime")}
+        actions={
+          <button
+            data-testid="global-scan-toggle"
+            onClick={globalScan}
+            disabled={globalScanning}
+            className="btn btn-outline btn-sm"
+            title={t("common.globalScan")}
+            aria-label={t("common.globalScan")}
+          >
+            <RefreshCw size={12} className={globalScanning ? "animate-spin" : ""} />
+            <span className="hidden lg:inline">重新扫描</span>
+          </button>
+        }
+      />
+      <div className="flex-1 overflow-y-auto p-6">
+
+      <div className="space-y-3">
+        {/* Metrics row */}
+        <div className="grid grid-cols-4 gap-3">
+          {metrics.map((m) => (
+            <div key={m.label} className="card px-3.5 py-3">
+              <div className="text-[21px] font-bold tnum leading-tight">{m.value}</div>
+              <div className="text-[10.5px] text-faint mt-0.5">{m.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* What to do now + capability matrix */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="card p-4">
+            <h3 className="text-xs font-semibold text-muted mb-3 uppercase tracking-wider">{t(asKey("dashboard.todoTitle"))}</h3>
+            <div className="space-y-3">
+              {actions.map((a) => (
+                <div key={a.key} className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12px] font-medium text-heading truncate">{a.main}</p>
+                    <p className="text-xs text-faint truncate">{a.sub}</p>
+                  </div>
+                  {a.button ? (
+                    <button onClick={a.button.onClick} className="btn btn-outline btn-sm shrink-0">{a.button.label}</button>
+                  ) : (
+                    <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="card p-4">
+            <h3 className="text-xs font-semibold text-muted mb-3 uppercase tracking-wider">{t(asKey("dashboard.matrixTitle"))}</h3>
+            {agents.length === 0 ? (
+              <p className="text-xs text-faint">{t(asKey("dashboard.matrixEmpty"))}</p>
+            ) : (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-faint">
+                    <th className="py-1 pr-2 text-left font-normal"></th>
+                    <th className="py-1 px-2 text-right font-normal">{t(asKey("dashboard.matrixColSkills"))}</th>
+                    <th className="py-1 px-2 text-right font-normal">MCP</th>
+                    <th className="py-1 px-2 text-right font-normal">{t(asKey("dashboard.matrixColPlugins"))}</th>
+                    <th className="py-1 px-2 text-right font-normal">{t(asKey("dashboard.matrixColHooks"))}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {agents.map((a) => {
+                    const cells = [
+                      skills.filter((s) => s.links.includes(a.id)).length,
+                      extensions.filter((e) => e.runtime === a.id && e.kind === "mcp").length,
+                      extensions.filter((e) => e.runtime === a.id && e.kind === "plugin").length,
+                      extensions.filter((e) => e.runtime === a.id && e.kind === "hook").length,
+                    ];
+                    return (
+                      <tr key={a.id} className="border-t border-border-subtle">
+                        <td className="py-1.5 pr-2 min-w-0">
+                          <span className="flex items-center gap-2 min-w-0">
+                            <AgentGlyph id={a.id} label={a.label} size={18} active={a.enabled} />
+                            <span className="truncate">{a.label}</span>
+                          </span>
+                        </td>
+                        {cells.map((v, i) => (
+                          <td key={i} className={"py-1.5 px-2 text-right tnum " + (v === 0 ? "text-faint" : "text-content")}>{v}</td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        {/* Agent status + recent activity */}
+        <div className="grid grid-cols-2 gap-3">
         {/* Agent status */}
         <div className="card p-4">
           <h3 className="text-xs font-semibold text-muted mb-3 uppercase tracking-wider">{t("dashboard.agentStatus")}</h3>
@@ -196,6 +364,10 @@ export default function DashboardView() {
           )}
         </div>
 
+        </div>
+
+        {/* Agent activity + task progress */}
+        <div className="grid grid-cols-2 gap-3">
         {/* Live Agent activity observed by hooks */}
         <div className="card p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
@@ -280,7 +452,9 @@ export default function DashboardView() {
             </div>
           )}
         </div>
+        </div>
       </div>
+    </div>
     </div>
   );
 }

@@ -7,11 +7,14 @@ import {
   deleteExt,
   extConfigPath,
 } from "../lib/tauri";
-import { Server, Plus, X } from "lucide-react";
+import { Server, Search, Plus, X } from "lucide-react";
 import type { ExtensionRow, McpServerInput, AgentInfo } from "../types";
-import { ExtRow } from "../components/ExtList";
+import { ExtRow, ExtCard } from "../components/ExtList";
+import ViewToggle from "../components/ViewToggle";
 import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
+import PageHeader, { ContentTitle } from "../components/PageHeader";
+import SearchInput from "../components/SearchInput";
 
 const toast = () => useToastStore.getState();
 
@@ -23,6 +26,12 @@ export default function MCPView() {
   const extensions = useMemo(
     () => allExtensions.filter((e) => e.kind === "mcp"),
     [allExtensions],
+  );
+  const [query, setQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+  const visible = useMemo(
+    () => extensions.filter((e) => e.name.toLowerCase().includes(query.trim().toLowerCase())),
+    [extensions, query],
   );
   const extIds = extensions.map((e) => e.id).join(",");
   const [editing, setEditing] = useState<ExtensionRow | null>(null);
@@ -68,21 +77,44 @@ export default function MCPView() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex items-center gap-3 px-6 py-3 border-b border-border bg-surface">
-        <h2 className="text-sm font-semibold text-content dark:text-heading">{t("mcp.title")}</h2>
-        <div className="flex items-center gap-2 ml-auto">
+      <PageHeader
+        toolbar={
+          <>
+            <ViewToggle mode={viewMode} onChange={setViewMode} />
+            <SearchInput value={query} onChange={setQuery} placeholder={t("mcp.search")} />
+          </>
+        }
+        actions={
           <button onClick={() => setShowAdd(true)} className="btn btn-primary">
             <Plus size={14} /> {t("mcp.add")}
           </button>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="flex-1 overflow-y-auto bg-page p-4">
+      <div className="flex-1 overflow-y-auto">
+        <ContentTitle title={t("mcp.title")} meta={t("mcp.desc")} />
         {extensions.length === 0 ? (
-          <EmptyState icon={<Server size={40} />} text={t("mcp.empty")} hint={t("mcp.emptyHint")} />
+          <EmptyState
+            icon={<Server size={40} />}
+            text={t("mcp.empty")}
+            hint={t("mcp.emptyHint")}
+            action={
+              <button onClick={() => setShowAdd(true)} className="btn btn-primary">
+                <Plus size={14} /> {t("mcp.add")}
+              </button>
+            }
+          />
+        ) : visible.length === 0 ? (
+          <EmptyState icon={<Search size={40} />} text={t("mcp.noMatch")} hint={t("mcp.noMatchHint")} />
+        ) : viewMode === "grid" ? (
+          <div className="px-6 pb-6 card-grid">
+            {visible.map((ext) => (
+              <ExtCard key={ext.id} ext={ext} kindPath={paths[ext.id]} onToggle={() => handleToggle(ext)} onDelete={() => handleDelete(ext)} onEdit={() => setEditing(ext)} />
+            ))}
+          </div>
         ) : (
-          <div className="space-y-1.5">
-            {extensions.map((ext) => (
+          <div className="list-panel mx-6 mb-6">
+            {visible.map((ext) => (
               <ExtRow key={ext.id} ext={ext} kindPath={paths[ext.id]} onToggle={() => handleToggle(ext)} onDelete={() => handleDelete(ext)} onEdit={() => setEditing(ext)} />
             ))}
           </div>
@@ -102,12 +134,13 @@ export default function MCPView() {
   );
 }
 
-export function EmptyState({ icon, text, hint }: { icon: React.ReactNode; text: string; hint: string }) {
+export function EmptyState({ icon, text, hint, action }: { icon: React.ReactNode; text: string; hint?: string; action?: React.ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center py-20 text-faint">
       {icon}
       <p className="text-sm mt-2">{text}</p>
-      <p className="text-xs mt-1">{hint}</p>
+      {hint && <p className="text-xs mt-1">{hint}</p>}
+      {action && <div className="mt-4">{action}</div>}
     </div>
   );
 }

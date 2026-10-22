@@ -12,6 +12,7 @@ const skills = read("../src/views/SkillsView.tsx");
 const connectionDialog = read("../src/components/ConnectionConfirmationDialog.tsx");
 const skillDeleteDialog = read("../src/components/SkillDeleteDialog.tsx");
 const styles = read("../src/styles.css");
+const pageHeader = read("../src/components/PageHeader.tsx");
 
 const mainWindow = tauriConfig.app.windows.find((window) => window.title === "SkillDeck");
 assert.ok(mainWindow, "main Tauri window must be configured");
@@ -44,28 +45,31 @@ assert.match(
 assert.match(app, /data-tauri-drag-region/, "overlay window must retain a drag region");
 assert.doesNotMatch(app, /h-9 border-b border-border/, "global white title strip must be removed");
 assert.match(app, /navExpanded/, "primary navigation drawer must be collapsible");
-assert.match(app, /data-testid="workspace-toolbar"/, "central content must have a workspace toolbar");
+assert.doesNotMatch(app, /data-testid="workspace-toolbar"/, "the flat workspace toolbar band must stay removed (V6 floating page bar)");
 assert.match(
-  app,
-  /<header[^>]*data-testid="workspace-toolbar"[^>]*data-tauri-drag-region="deep"/,
-  "empty areas throughout the workspace toolbar must drag the overlay window",
+  pageHeader,
+  /className="page-header" data-tauri-drag-region="deep"/,
+  "the floating page bar must drag the overlay window in its empty areas",
 );
-assert.match(app, /data-testid="left-drawer-toggle"/, "left drawer control must live in the workspace toolbar");
-assert.match(app, /data-testid="global-scan-toggle"/, "global scanning must live in the workspace toolbar");
-assert.match(app, /data-testid="theme-toggle"/, "theme quick switch must live in the workspace toolbar");
-assert.doesNotMatch(app, /right-drawer-toggle/, "the workspace toolbar must not render a right drawer toggle");
-
-const toolbarSource = app.slice(
-  app.indexOf('data-testid="workspace-toolbar"'),
-  app.indexOf('data-testid="workspace-toolbar"') + 2500,
-);
-assert.ok(toolbarSource.includes('data-testid="left-drawer-toggle"'), "left drawer control must be in the toolbar's left group");
+assert.match(app, /data-testid="left-drawer-toggle"/, "left drawer control must exist");
 assert.ok(
-  toolbarSource.indexOf('data-testid="global-scan-toggle"') >= 0 &&
-  toolbarSource.indexOf('data-testid="global-scan-toggle"') < toolbarSource.indexOf("<ThemeSwitcher") &&
-  toolbarSource.indexOf("<ThemeSwitcher") >= 0,
-  "global scanning must immediately precede the theme switch",
+  app.indexOf('data-testid="left-drawer-toggle"') < app.indexOf("sidebar-footer"),
+  "the collapse toggle must sit next to the brand row, not in the footer",
 );
+assert.doesNotMatch(app, /data-testid="global-scan-toggle"/, "global scanning must not live in the sidebar shell (V6: it belongs to the Overview page bar)");
+assert.match(read("../src/views/DashboardView.tsx"), /data-testid="global-scan-toggle"/, "global scanning must live on the Overview page bar");
+assert.match(app, /data-testid="theme-toggle"/, "theme quick switch must live in the sidebar footer");
+assert.doesNotMatch(app, /right-drawer-toggle/, "the shell must not render a right drawer toggle");
+
+const footerSource = app.slice(
+  app.indexOf('className="sidebar-footer"'),
+  app.indexOf('className="sidebar-footer"') + 1200,
+);
+assert.ok(
+  footerSource.includes("<ThemeSwitcher") && footerSource.includes('t("nav.settings")'),
+  "the theme switch must share the footer settings row (replacing the version number)",
+);
+assert.doesNotMatch(footerSource, /appVersion/, "the footer settings row must not render the version number");
 
 const scanableViews = [
   "../src/views/DashboardView.tsx",
@@ -85,10 +89,9 @@ for (const viewSource of scanableViews) {
   );
 }
 assert.doesNotMatch(read("../src/views/SettingsView.tsx"), /settings\.syncScan/, "Settings must not expose a separate scan action");
-assert.doesNotMatch(app, /function Sidebar\([\s\S]*?ThemeSwitcher/, "theme switching must not be owned by the primary sidebar");
-assert.match(app, /onToggleNav/, "the top-left workspace control must own primary navigation toggling");
+assert.match(app, /function Sidebar[\s\S]*?ThemeSwitcher/, "theme quick switch must live with the sidebar footer controls (V6)");
+assert.match(app, /onToggleNav/, "the sidebar footer must own primary navigation toggling");
 assert.doesNotMatch(app, /onToggleExpanded/, "primary navigation must not have a duplicate sidebar toggle");
-assert.doesNotMatch(app, /(?:收起|展开)导航/, "primary navigation toggling must not render sidebar-internal controls");
 assert.doesNotMatch(app, /leftDrawerOpen/, "the Skills filter drawer must not use the primary navigation control");
 assert.doesNotMatch(`${app}${styles}`, /app-sidebar-header/, "the standalone sidebar header must be removed");
 assert.ok(
@@ -96,7 +99,10 @@ assert.ok(
   "the logo must be the first item inside the sidebar navigation",
 );
 
-assert.match(skills, /data-testid="skills-left-drawer"/, "Skills left drawer must expose a test id");
+assert.doesNotMatch(skills, /skills-left-drawer/, "the Skills left rail must stay removed (V6: dropdown filter in the toolbar)");
+assert.match(skills, /setRailFilter/, "Skills must keep tag/library filtering state");
+assert.match(skills, /optgroup label="标签聚类"/, "the Skills filter dropdown must group tag clusters");
+assert.match(skills, /<ViewToggle mode=\{viewMode\}/, "Skills must offer the V6 grid/list view switch");
 
 assert.doesNotMatch(skillsStore, /window\.confirm/, "Tauri WebView cannot rely on native confirm dialogs");
 assert.match(skillsStore, /connectionConfirmation/, "shared disconnect must use application confirmation state");
@@ -107,7 +113,7 @@ assert.match(skillsStore, /skillDeleteConfirmation/, "skill deletion must use ex
 assert.match(app, /<SkillDeleteDialog/, "skill deletion must render an in-app confirmation dialog");
 assert.match(skillDeleteDialog, /data-testid="skill-delete-dialog"/, "skill deletion confirmation must expose a dialog test id");
 assert.match(skills, /testId="skill-detail-drawer"/, "Skills detail drawer must expose a test id");
-assert.match(skills, /data-left-open/, "Skills left drawer state must be explicit");
+assert.doesNotMatch(skills, /data-left-open/, "Skills must not carry legacy left-drawer state");
 assert.equal(skills.match(/<SkillDetail\s*\/>/g)?.length, 1, "Skill detail must render exactly once");
 assert.ok(
   skills.indexOf("<SkillDetail />") > skills.indexOf('testId="skill-detail-drawer"'),
@@ -141,7 +147,7 @@ assert.match(
   "batch disconnect must convert shared-link errors into a confirmation dialog",
 );
 
-assert.match(styles, /\.skill-layout--left-closed/, "closed Skills left drawer must remove its grid track");
+assert.doesNotMatch(styles, /\.skill-layout/, "the Skills grid layout (left drawer track) must stay removed");
 assert.match(styles, /--width-sidebar-collapsed:\s*64px/, "collapsed primary sidebar must be 64px wide");
 assert.doesNotMatch(
   styles,
@@ -152,31 +158,35 @@ assert.match(app, /import SkillsView from "\.\/views\/SkillsView";/, "SkillsView
 assert.doesNotMatch(app, /SkillsRightDrawer/, "the inline Skills right drawer must be removed");
 assert.doesNotMatch(app, /rightDrawerOpen/, "the app must not own skill drawer layout state");
 assert.match(skills, /import DetailDrawer from "\.\.\/components\/DetailDrawer";/, "SkillsView must use the shared detail drawer");
-assert.match(styles, /\.app-shell\s*\{[^}]*flex-direction:\s*column/, "the full-width workspace toolbar must sit above the drawer body");
-assert.match(styles, /\.workspace-body\s*\{[^}]*display:\s*flex/, "the sidebar and central workspace must share the area below the toolbar");
-assert.match(styles, /\.workspace-toolbar\s*\{[^}]*width:\s*100%/, "workspace toolbar must occupy the full workspace width");
+assert.doesNotMatch(styles, /\.app-shell\s*\{[^}]*flex-direction:\s*column/, "the shell must be a left-right layout: full-height sidebar on the left, floating page bar inside the main column");
+assert.match(
+  app,
+  /<Sidebar[\s\S]*?<main className="app-main">/,
+  "the full-height sidebar must render before the main column",
+);
+assert.match(styles, /\.workspace-body\s*\{[^}]*display:\s*flex/, "the sidebar and central workspace must share the main area");
+assert.match(styles, /\.page-header\s*\{[^}]*border-radius:\s*10px/, "the floating page bar must be a rounded pill (V6)");
+assert.match(styles, /\.page-header\s*\{[^}]*var\(--height-page-bar\)/, "the floating page bar height must use a layout token");
+assert.match(styles, /\.page-header\s*\{[^}]*var\(--mat-glass-bg\)/, "the floating page bar must use the glass material");
+assert.match(styles, /\.page-content-title\s*\{/, "collection pages must have a content-area title class");
 assert.match(
   styles,
-  /\.workspace-toolbar\s*\{[^}]*padding-left:\s*var\(--offset-macos-traffic-lights\)/,
-  "the full-width toolbar must reserve space for macOS traffic lights",
+  /\.app-sidebar-nav-top\s*\{[^}]*min-height:\s*64px/,
+  "the sidebar brand strip must clear the macOS traffic lights",
+);
+assert.match(
+  styles,
+  /\.app-sidebar-nav-top\s*\{[^}]*padding:\s*36px/,
+  "the sidebar brand strip must be pushed below the macOS traffic lights",
 );
 assert.match(styles, /\.detail-drawer\s*\{[^}]*height:\s*100%/, "the shared detail drawer must occupy the full workspace height");
-assert.match(
-  styles,
-  /\.skill-layout\s*\{[^}]*grid-template-columns:\s*var\(--width-left-drawer\) minmax\(0, 1fr\)/,
-  "the Skills center layout must contain only its filter drawer and center column",
-);
-assert.match(
-  styles,
-  /\.skill-layout--left-closed\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\);/,
-  "closing the Skills filter drawer must leave only the center column",
-);
-assert.doesNotMatch(styles, /\.skill-layout--right-closed/, "right-drawer opening state must not alter the center grid");
+assert.match(styles, /\.seg\s*\{/, "the V6 segmented control must be a shared component class");
+assert.match(styles, /\.card-selected\s*\{/, "grid card selection must use a shared ring class");
+assert.doesNotMatch(styles, /\.rail-item/, "rail item classes must stay removed with the Skills left rail");
 
 for (const className of [
-  ".workspace-toolbar",
-  ".workspace-toolbar-left",
-  ".workspace-toolbar-right",
+  ".page-header",
+  ".page-header__spacer",
   ".app-sidebar",
   ".sidebar-item",
 ]) {
@@ -186,19 +196,21 @@ for (const className of [
     `${className} must be a token-driven component class`,
   );
 }
-assert.match(styles, /\.workspace-toolbar\s*\{[^}]*var\(--height-workspace-toolbar\)/, "workspace toolbar height must use a layout token");
-assert.match(styles, /\.sidebar-item\s*\{[^}]*var\(--text-xs\)/, "sidebar typography must use a type token");
+assert.match(styles, /\.sidebar-item\s*\{[^}]*var\(--text-2xs\)/, "sidebar typography must use a type token");
 assert.match(styles, /\.sidebar-item\s*\{[^}]*var\(--space-[0-9]+\)/, "sidebar spacing must use the spacing scale");
 assert.match(skills, /skills-toolbar-label/, "Skills toolbar labels must be collapsible in a narrow center column");
-assert.doesNotMatch(skills, /gridTemplateColumns/, "table rows and headers must share the token-driven grid definition");
-assert.equal((skills.match(/skills-table-grid/g) ?? []).length, 2, "table rows and headers must use the shared grid class");
-assert.match(skills, /className="min-w-0 truncate text-sm font-semibold text-heading"/, "skill names must opt into shrinking inside their grid track");
-assert.match(styles, /\.skills-toolbar\s*\{[^}]*container-type:\s*inline-size/, "Skills toolbar must measure its own center-column width");
+assert.doesNotMatch(skills, /gridTemplateColumns/, "list rows must use the shared V1 row class, not inline grid definitions");
+assert.doesNotMatch(skills, /skills-table-(grid|header)/, "the legacy skills table must stay replaced by V1 list rows");
+assert.match(skills, /list-row--skill/, "the Skills list must use the V1 five-column row (name/desc/dots/audit/chevron)");
+assert.match(skills, /list-row__name/, "skill names must opt into shrinking inside the V1 row");
+assert.match(styles, /\.list-panel\s*\{/, "row collections must live inside the shared V1 list panel");
+assert.match(styles, /\.list-row\s*\{[^}]*min-height:\s*46px/, "V1 list rows must keep the 46px row height");
 assert.match(
   styles,
-  /\.skills-table-grid\s*\{[^}]*grid-template-columns:\s*minmax\(var\(--width-skill-name-min\), clamp\(var\(--width-skill-name-min\), var\(--width-skill-name-flex\), var\(--width-skill-name-max\)\)\)[\s\S]*?minmax\(var\(--width-skill-agents\), 1fr\)[\s\S]*?minmax\(var\(--width-skill-permissions\), var\(--width-skill-permissions-max\)\)[\s\S]*?minmax\(var\(--width-skill-audit\), var\(--width-skill-audit-max\)\)[\s\S]*?minmax\(var\(--width-skill-state\), var\(--width-skill-state-max\)\);/,
-  "Skills metadata columns must expand up to their content-based maximum widths",
+  /\.list-row--skill\s*\{[^}]*grid-template-columns:\s*minmax\(150px, 220px\) minmax\(0, 1fr\) auto auto 14px;/,
+  "the Skills V1 row must keep its five-track grid",
 );
+assert.match(styles, /\.skills-toolbar\s*\{[^}]*container-type:\s*inline-size/, "Skills toolbar must measure its own center-column width");
 assert.match(
   styles,
   /@container[^{]*max-width[^{]*\{[\s\S]*?\.skills-toolbar-label\s*\{\s*display:\s*none;/,

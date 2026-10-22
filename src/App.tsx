@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import * as api from "./lib/tauri";
 import { useUiStore } from "./stores/ui";
 import { useSkillsStore } from "./stores/skills";
 import { useAssetsStore } from "./stores/assets";
@@ -25,7 +24,7 @@ import ToastContainer from "./components/Toast";
 import AgentActivityNotifier from "./components/AgentActivityNotifier";
 import ConnectionConfirmationDialog from "./components/ConnectionConfirmationDialog";
 import SkillDeleteDialog from "./components/SkillDeleteDialog";
-import { LayoutDashboard, FileText, Settings as SettingsIcon, BookOpen, Plug, Layers, Webhook, Server, Sun, Moon, FolderKanban, PanelLeftClose, PanelLeftOpen, RefreshCw, ShieldCheck, Store } from "lucide-react";
+import { LayoutDashboard, FileText, Settings as SettingsIcon, BookOpen, Plug, Layers, Webhook, Server, Sun, Moon, FolderKanban, PanelLeftClose, PanelLeftOpen, ShieldCheck, Store } from "lucide-react";
 import { Cpu } from "lucide-react";
 import logoUrl from "./assets/logo.png";
 import type { ViewKey } from "./types";
@@ -128,19 +127,14 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <WorkspaceToolbar
-        theme={theme}
-        onThemeChange={setTheme}
-        scanning={globalScanning}
-        onScan={globalScan}
-        navExpanded={navExpanded}
-        onToggleNav={() => setNavExpanded((expanded) => !expanded)}
-      />
       <div className="workspace-body">
         <Sidebar
           view={view}
           onChange={setView}
           expanded={navExpanded}
+          onToggleNav={() => setNavExpanded((expanded) => !expanded)}
+          theme={theme}
+          onThemeChange={setTheme}
         />
         <main className="app-main">
           <div className="workspace-content">{views[view]}</div>
@@ -173,58 +167,6 @@ function ComingSoon({ name }: { name: string }) {
         <p className="text-sm mt-1">{t("common.comingSoon")}</p>
       </div>
     </div>
-  );
-}
-
-function WorkspaceToolbar({
-  theme,
-  onThemeChange,
-  scanning,
-  onScan,
-  navExpanded,
-  onToggleNav,
-}: {
-  theme: string;
-  onThemeChange: (theme: "light" | "dark" | "system") => void;
-  scanning: boolean;
-  onScan: () => void;
-  navExpanded: boolean;
-  onToggleNav: () => void;
-}) {
-  const t = useT();
-  return (
-    <header
-      data-testid="workspace-toolbar"
-      data-tauri-drag-region="deep"
-      className="workspace-toolbar"
-    >
-      <div className="workspace-toolbar-left">
-        <button
-          data-testid="left-drawer-toggle"
-          onClick={onToggleNav}
-          className="btn-icon shrink-0"
-          title={navExpanded ? "收起主侧栏" : "展开主侧栏"}
-          aria-label={navExpanded ? "收起主侧栏" : "展开主侧栏"}
-          aria-expanded={navExpanded}
-        >
-          {navExpanded ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
-        </button>
-      </div>
-      <div data-tauri-drag-region className="workspace-toolbar-spacer" />
-      <div className="workspace-toolbar-right">
-        <button
-          data-testid="global-scan-toggle"
-          onClick={onScan}
-          disabled={scanning}
-          className="btn-icon shrink-0"
-          title={t("common.globalScan")}
-          aria-label={t("common.globalScan")}
-        >
-          <RefreshCw size={14} className={scanning ? "animate-spin" : ""} />
-        </button>
-        <ThemeSwitcher theme={theme} onChange={onThemeChange} />
-      </div>
-    </header>
   );
 }
 
@@ -261,14 +203,18 @@ function Sidebar({
   view,
   onChange,
   expanded,
+  onToggleNav,
+  theme,
+  onThemeChange,
 }: {
   view: ViewKey;
   onChange: (v: ViewKey) => void;
   expanded: boolean;
+  onToggleNav: () => void;
+  theme: string;
+  onThemeChange: (theme: "light" | "dark" | "system") => void;
 }) {
 const t = useT();
- const [appVersion, setAppVersion] = useState("");
- useEffect(() => { api.getAppInfo().then((info) => setAppVersion(info.version)).catch(() => {}); }, []);
  const skills = useSkillsStore((s) => s.skills);
  const prompts = useAssetsStore((s) => s.prompts);
  const rules = useAssetsStore((s) => s.rules);
@@ -276,20 +222,43 @@ const t = useT();
  const extensions = useExtensionsStore((s) => s.extensions);
  const agents = useWorkspaceStore((s) => s.agents);
  const projects = useWorkspaceStore((s) => s.projects);
-const items: { key: ViewKey; label: string; icon: React.ReactNode; badge?: number }[] = [
-   { key: "dashboard", label: t("nav.dashboard"), icon: <LayoutDashboard size={17} /> },
-   { key: "agents", label: t("nav.agents"), icon: <Cpu size={17} />, badge: agents.length },
-   { key: "skills", label: t("nav.skills"), icon: <BookOpen size={17} />, badge: skills.length },
-   { key: "market", label: t("nav.market"), icon: <Store size={17} /> },
-   { key: "audit", label: t("nav.audit"), icon: <ShieldCheck size={17} />, badge: skills.filter((s) => s.audit_verdict === "block").length || undefined },
-   { key: "rules", label: t("nav.rules"), icon: <FileText size={17} />, badge: rules.length },
-   { key: "mcp", label: t("nav.mcp"), icon: <Server size={17} />, badge: extensions.filter((e) => e.kind === "mcp").length },
-   { key: "plugins", label: t("nav.plugins"), icon: <Plug size={17} />, badge: extensions.filter((e) => e.kind === "plugin").length },
-   { key: "hooks", label: t("nav.hooks"), icon: <Webhook size={17} />, badge: extensions.filter((e) => e.kind === "hook").length },
-   { key: "presets", label: t("nav.presets"), icon: <Layers size={17} />, badge: packages.length },
-   { key: "projects", label: t("nav.projects"), icon: <FolderKanban size={17} />, badge: projects.length },
-   { key: "prompts", label: t("nav.prompts"), icon: <FileText size={17} />, badge: prompts.length },
- ];
+const unaudited = skills.filter((s) => !s.audit_verdict).length;
+const navGroups: { label?: string; items: { key: ViewKey; label: string; icon: React.ReactNode; badge?: number; badgeTitle?: string }[] }[] = [
+  {
+    items: [{ key: "dashboard", label: t("nav.dashboard"), icon: <LayoutDashboard size={17} /> }],
+  },
+  {
+    label: t("nav.groupKnowledge"),
+    items: [
+      { key: "skills", label: t("nav.skills"), icon: <BookOpen size={17} />, badge: skills.length },
+      { key: "prompts", label: t("nav.prompts"), icon: <FileText size={17} />, badge: prompts.length },
+      { key: "rules", label: t("nav.rules"), icon: <FileText size={17} />, badge: rules.length },
+    ],
+  },
+  {
+    label: t("nav.groupAgents"),
+    items: [
+      { key: "agents", label: t("nav.agents"), icon: <Cpu size={17} />, badge: agents.length },
+      { key: "mcp", label: t("nav.mcp"), icon: <Server size={17} />, badge: extensions.filter((e) => e.kind === "mcp").length },
+      { key: "plugins", label: t("nav.plugins"), icon: <Plug size={17} />, badge: extensions.filter((e) => e.kind === "plugin").length },
+      { key: "hooks", label: t("nav.hooks"), icon: <Webhook size={17} />, badge: extensions.filter((e) => e.kind === "hook").length },
+    ],
+  },
+  {
+    label: t("nav.groupApply"),
+    items: [
+      { key: "presets", label: t("nav.presets"), icon: <Layers size={17} />, badge: packages.length },
+      { key: "projects", label: t("nav.projects"), icon: <FolderKanban size={17} />, badge: projects.length },
+    ],
+  },
+  {
+    label: t("nav.groupDiscover"),
+    items: [
+      { key: "market", label: t("nav.market"), icon: <Store size={17} /> },
+      { key: "audit", label: t("nav.audit"), icon: <ShieldCheck size={17} />, badge: unaudited || undefined, badgeTitle: t("nav.auditBadgeTitle", { count: unaudited }) },
+    ],
+  },
+];
 
   return (
     <aside
@@ -303,43 +272,76 @@ const items: { key: ViewKey; label: string; icon: React.ReactNode; badge?: numbe
             <img src={logoUrl} alt="" className="app-sidebar-logo" />
           </div>
           {expanded && (
-            <span className="app-sidebar-title">SkillDeck</span>
+            <>
+              <span className="app-sidebar-title">SkillDeck</span>
+              <button
+                data-testid="left-drawer-toggle"
+                onClick={onToggleNav}
+                className="btn-icon"
+                title="收起主侧栏"
+                aria-label="收起主侧栏"
+                aria-expanded={expanded}
+              >
+                <PanelLeftClose size={14} />
+              </button>
+            </>
+          )}
+          {!expanded && (
+            <button
+              data-testid="left-drawer-toggle"
+              onClick={onToggleNav}
+              className="btn-icon"
+              title="展开主侧栏"
+              aria-label="展开主侧栏"
+              aria-expanded={expanded}
+            >
+              <PanelLeftOpen size={14} />
+            </button>
           )}
         </div>
-        {items.map((item) => (
-          <button
-            key={item.key}
-            onClick={() => onChange(item.key)}
-            title={item.label}
-            aria-current={view === item.key ? "page" : undefined}
-            className={
-              "sidebar-item " +
-              (expanded ? "" : "sidebar-item--collapsed ") +
-              (view === item.key ? "sidebar-item--active" : "")
-            }
-          >
-            {item.icon}
-            {expanded && <span className="truncate">{item.label}</span>}
-            {expanded && item.badge !== undefined && item.badge > 0 && (
-              <span className="sidebar-badge">{item.badge}</span>
-            )}
-          </button>
+        {navGroups.map((group, gi) => (
+          <div key={group.label ?? `g${gi}`} className="sidebar-group">
+            {expanded && group.label && <div className="nav-group-label">{group.label}</div>}
+            {group.items.map((item) => (
+              <button
+                key={item.key}
+                onClick={() => onChange(item.key)}
+                title={item.badgeTitle || item.label}
+                aria-current={view === item.key ? "page" : undefined}
+                className={
+                  "sidebar-item " +
+                  (expanded ? "" : "sidebar-item--collapsed ") +
+                  (view === item.key ? "sidebar-item--active" : "")
+                }
+              >
+                {item.icon}
+                {expanded && <span className="truncate">{item.label}</span>}
+                {expanded && item.badge !== undefined && item.badge > 0 && (
+                  <span className="sidebar-badge">{item.badge}</span>
+                )}
+              </button>
+            ))}
+          </div>
         ))}
       </nav>
      <div className="sidebar-footer">
-       <button
-         onClick={() => onChange("settings")}
-         title={t("nav.settings")}
-         className={
-           "sidebar-item " +
-           (expanded ? "" : "sidebar-item--collapsed ") +
-           (view === "settings" ? "sidebar-item--active" : "")
-         }
-       >
-         <SettingsIcon size={17} />
-         {expanded && <span className="truncate">{t("nav.settings")}</span>}
-        {expanded && appVersion && <span className="ml-auto text-2xs font-mono opacity-70">v{appVersion}</span>}
-     </button>
+       <div className="flex items-center">
+         <button
+           onClick={() => onChange("settings")}
+           title={t("nav.settings")}
+           className={
+             "sidebar-item " +
+             (expanded ? "" : "sidebar-item--collapsed ") +
+             (view === "settings" ? "sidebar-item--active" : "")
+           }
+         >
+           <SettingsIcon size={17} />
+           {expanded && <span className="truncate">{t("nav.settings")}</span>}
+         </button>
+         <div className={expanded ? "ml-auto pr-1" : "w-full flex justify-center pb-1"}>
+           <ThemeSwitcher theme={theme} onChange={onThemeChange} />
+         </div>
+       </div>
     </div>
     </aside>
   );

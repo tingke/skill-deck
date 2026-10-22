@@ -1,6 +1,6 @@
 # 代码风格（Code Style）
 
-> 最后更新：2026-08-29。仓库没有强制 formatter/linter；新改动应匹配相邻代码，而不是大规模重排既有文件。
+> 最后更新：2026-10-21。仓库没有强制 formatter/linter；新改动应匹配相邻代码，而不是大规模重排既有文件。
 
 ## 通用规则
 
@@ -44,6 +44,24 @@
 - 主题色、间距、字号、圆角、阴影和 z-index 使用 `src/styles.css` 的 CSS variables / Tailwind semantic tokens。
 - 复杂布局优先沉淀为 `styles.css` 中的组件类，并用 token 控制宽度与高度。
 - 深色模式通过 class 切换；不要写死只适配浅色的颜色。
+
+### 统一 UI 组件与页面规范（2026-10-21 起）
+
+新页面或改老页面时按下述约定走，不要再各页自建；完整背景见 `designs/页面统一盘点与方案.md`，实物速查在应用内「设计系统」页。
+
+- 页面骨架（V6 悬浮玻璃工具栏）：每页一条圆角玻璃 pill `PageHeader`（高 `--height-page-bar` 40px，inset 10/12）——左＝标题（可省）+ 副题 + `toolbar` 槽（`SearchInput` 等），右＝至多一个 `.btn-primary` 主按钮；空白区即窗口拖拽区。集合页标题下放内容区，用 `ContentTitle`（h1 20/700 + meta 11px）；概览/安检等标题留在栏内。技能页用同款 `.skills-toolbar` pill（视图切换用 `.seg` 分段控件，标签/库源筛选用下拉 `optgroup`，不用左侧聚类栏）。
+- 全局控制：折叠侧栏、全局扫描、主题切换固定在侧栏底部 footer，不在页面栏内重复；概览页可在栏内加扫描快捷钮。
+- 搜索：可增长集合页（≥3 条）必须有；用 `SearchInput`（固定 `--width-search` 180px，含搜索图标）；筛选控件（下拉）并入同一栏，不放搜索右侧之外。
+- 空态：用 `.empty-state` 四要素——图标 + 「没有X」标题 + 一句为什么空 + 主行动按钮（复用页头动作）；`EmptyState`（从 `MCPView` 导出）支持可选 `action`。
+- 危险操作：列表行尾至多一个 `RowMenu`（⋯ 菜单），编辑/删除收进去；删除仍走 `useDeleteConfirmation` + `DeleteConfirmDialog`；红色只允许出现在菜单层、危险徽章和确认框内，行内不常驻红垃圾桶。
+- 开关：`ToggleSwitch`（ExtList）与卡片图标开关选中态用 `bg-accent`/`text-accent`；不用绿色表达「启用」。
+- 语义色锁定：绿=安全/已启用、黄=需留意、红=危险/错误、灰=未配置/零值、紫=强调/选中；零值计数一律 `text-faint`。
+- 术语：页面标题、列名、徽章中文优先——Skill=技能、MCP=工具（MCP）、Hook=钩子、Agent=智能体；「接线」（Agent 连接）与「启用」是两套状态，不混用。
+- 材质层：玻璃只用于 chrome（侧栏/聚类栏/悬浮页栏/抽屉/悬浮控件），用 `.glass-panel` / `.ambient-bg`；卡片与正文实底（暗色 surface=#232329、页面底=#131318，见 `--c-*` 暗色组）。token 见 `--mat-glass-*`、`--grad-ambient`、`--mat-content-tint`、`--c-accent-text`（暗色下图标/链接用提亮紫）。
+- 控件规格：`.btn` 高 26/字 12/圆角 7（主按钮带内高光+紫色投影）、`.btn-icon` 26、`.input` 高 26/字 12；卡片网格用 `.card-grid`（`repeat(auto-fill, minmax(272px, 1fr))` gap 12），不要写死 `grid-cols-2`。
+- 列表样式（V1 原型）：行集合装进 `.list-panel`（圆角 11 实底 + 发丝线边框），行用 `.list-row`（46px、发丝线分隔、hover surface、选中 accent-soft）；技能列表行是五列变体 `.list-row--skill`（名称/描述/智能体图标簇/体检徽章/箭头）；不要给单行自配边框或阴影。
+- 详情抽屉（V1 Inspector）：`DetailDrawer` = 340px 玻璃面板（surface 94% + blur 30 + saturate 1.6）、无遮罩压暗、280ms cubic-bezier(.32,.72,0,1) 滑入、标题 16/700 + 圆形关闭钮；底栏不放底色；内容区各页用 hairline 分组，不要整块实底包裹。
+- 密钥输入：`type="text"` + `[-webkit-text-security:disc]` CSS 掩码（WKWebView/Chromium 均支持），不用 `type="password"`，避免触发密码管理器且保持掩码显示。
 
 ## Rust / Tauri
 

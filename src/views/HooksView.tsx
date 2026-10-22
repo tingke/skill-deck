@@ -12,7 +12,10 @@ import {
 import { Webhook, Plus, X } from "lucide-react";
 import type { ExtensionRow, HookInput, HookObserverStatus } from "../types";
 import { HOOK_EVENTS } from "../types";
-import { ExtRow, ToggleSwitch } from "../components/ExtList";
+import { ExtRow, ExtCard, ToggleSwitch } from "../components/ExtList";
+import ViewToggle from "../components/ViewToggle";
+import PageHeader, { ContentTitle } from "../components/PageHeader";
+import SearchInput from "../components/SearchInput";
 import { AgentGlyph } from "../components/AgentGlyph";
 import { EmptyState } from "./MCPView";
 import { useToastStore } from "../stores/toast";
@@ -36,6 +39,13 @@ export default function HooksView() {
   const extIds = extensions.map((e) => e.id).join(",");
   const [editing, setEditing] = useState<ExtensionRow | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+  const [query, setQuery] = useState("");
+  const visibleHooks = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return extensions;
+    return extensions.filter((e) => e.name.toLowerCase().includes(q));
+  }, [extensions, query]);
   const [paths, setPaths] = useState<Record<string, string>>({});
   const [observerStatuses, setObserverStatuses] = useState<HookObserverStatus[]>([]);
   const [observerBusy, setObserverBusy] = useState<string | null>(null);
@@ -103,18 +113,23 @@ export default function HooksView() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex items-center gap-3 px-6 py-3 border-b border-border bg-surface">
-        <h2 className="text-sm font-semibold text-content dark:text-heading">{t("hooks.title")}</h2>
-        <span className="text-[13px] text-faint">{t("hooks.desc")}</span>
-        <div className="flex items-center gap-2 ml-auto">
+      <PageHeader
+        toolbar={
+          <>
+            <ViewToggle mode={viewMode} onChange={setViewMode} />
+            <SearchInput value={query} onChange={setQuery} placeholder={t("hooks.search")} />
+          </>
+        }
+        actions={
           <button onClick={() => setShowAdd(true)} className="btn btn-primary">
             <Plus size={14} /> {t("hooks.add")}
           </button>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="flex-1 overflow-y-auto bg-page p-4">
-        <section className="bg-surface rounded-xl border border-border p-4 mb-4" data-testid="agent-observer-panel">
+      <div className="flex-1 overflow-y-auto">
+        <ContentTitle title={t("hooks.title")} meta={t("hooks.desc")} />
+        <section className="bg-surface rounded-xl border border-border p-4 mb-4 mx-6" data-testid="agent-observer-panel">
           <div className="flex items-center gap-2 mb-1">
             <h3 className="text-sm font-semibold text-content">{t("hooks.observerTitle")}</h3>
             <span className="badge bg-surface-2 text-muted">{t("hooks.observerBadge")}</span>
@@ -141,9 +156,15 @@ export default function HooksView() {
 
         {extensions.length === 0 ? (
           <EmptyState icon={<Webhook size={40} />} text={t("hooks.empty")} hint={t("hooks.emptyHint")} />
+        ) : viewMode === "grid" ? (
+          <div className="px-6 pb-6 card-grid">
+            {visibleHooks.map((ext) => (
+              <ExtCard key={ext.id} ext={ext} kindPath={paths[ext.id]} onToggle={() => handleToggle(ext)} onDelete={() => handleDelete(ext)} onEdit={() => setEditing(ext)} />
+            ))}
+          </div>
         ) : (
-          <div className="space-y-1.5">
-            {extensions.map((ext) => (
+          <div className="list-panel mx-6 mb-6">
+            {visibleHooks.map((ext) => (
               <ExtRow key={ext.id} ext={ext} kindPath={paths[ext.id]} onToggle={() => handleToggle(ext)} onDelete={() => handleDelete(ext)} onEdit={() => setEditing(ext)} />
             ))}
           </div>
