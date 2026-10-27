@@ -13,6 +13,18 @@ import { tr } from "../i18n";
 const toast = () => useToastStore.getState();
 const refreshActivity = () => useActivityStore.getState().loadActivity();
 
+// 连接类操作后的统一回刷：verify_connections 会校验 symlink 实际状态，
+// 不能替换为只读 DB 的 loadSkills()
+const refreshAfterConnectionOp = async (skillId?: string) => {
+  const store = useSkillsStore.getState();
+  const skills = await api.verifyConnections();
+  useSkillsStore.setState({ skills });
+  if (skillId && store.selectedSkillId === skillId) {
+    await useSkillsStore.getState().loadSkillConnections(skillId);
+  }
+  refreshActivity();
+};
+
 interface SkillsState {
   skills: Skill[];
   agentOptions: AgentInfo[];
@@ -21,15 +33,12 @@ interface SkillsState {
   connectionConfirming: boolean;
   skillDeleteConfirmation: SkillDeleteConfirmation | null;
   skillDeleting: boolean;
+  batchDeleteIds: string[] | null;
+  batchDeleting: boolean;
   loading: boolean;
   globalScanning: boolean;
   selectedSkillId: string | null;
-  skillContent: string;
-  loadingContent: boolean;
   skillFiles: SkillFileEntry[];
-  selectedFilePath: string | null;
-  selectedFileContent: string;
-  editingSkill: boolean;
   skillAudit: AuditReport | null;
   auditingSkill: boolean;
   loadSkills: () => Promise<void>;
@@ -40,6 +49,9 @@ interface SkillsState {
   requestSkillDelete: (confirmation: SkillDeleteConfirmation) => void;
   cancelSkillDelete: () => void;
   confirmSkillDelete: () => Promise<void>;
+  requestBatchDelete: (skillIds: string[]) => void;
+  cancelBatchDelete: () => void;
+  confirmBatchDelete: () => Promise<void>;
   updateTags: (skillId: string, tags: string[]) => Promise<void>;
   toggleSkillEnabled: (skillId: string, enabled: boolean) => Promise<void>;
   toggleConnect: (skillId: string, agentId: string) => Promise<void>;
@@ -49,13 +61,10 @@ interface SkillsState {
   cancelSharedDisconnect: () => void;
   confirmSharedDisconnect: () => Promise<void>;
   requestBatchSharedDisconnect: (confirmation: SharedDisconnectConfirmation) => void;
+  refreshAfterConnectionOp: (skillId?: string) => Promise<void>;
   verifyConnections: () => Promise<void>;
   selectSkill: (id: string | null) => void;
-  loadSkillContent: (id: string) => Promise<void>;
   loadSkillFiles: (id: string) => Promise<void>;
-  loadFileContent: (skillId: string, filePath: string) => Promise<void>;
-  saveSkillContent: (id: string, content: string) => Promise<void>;
-  setEditingSkill: (v: boolean) => void;
   loadSkillAudit: (id: string) => Promise<void>;
   runSkillAudit: (id: string) => Promise<void>;
 }
@@ -68,15 +77,12 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   connectionConfirming: false,
   skillDeleteConfirmation: null,
   skillDeleting: false,
+  batchDeleteIds: null,
+  batchDeleting: false,
   loading: false,
   globalScanning: false,
   selectedSkillId: null,
-  skillContent: "",
-  loadingContent: false,
   skillFiles: [],
-  selectedFilePath: null,
-  selectedFileContent: "",
-  editingSkill: false,
   skillAudit: null,
   auditingSkill: false,
 
@@ -178,7 +184,6 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       ),
     }));
     if (get().selectedSkillId === skillId) {
-      await get().loadSkillContent(skillId);
       await get().loadSkillConnections(skillId);
     }
   },
@@ -226,10 +231,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
         await api.connectSkill(skillId, agentId);
         toast().show(`已连接到 ${label}`);
       }
-      const skills = await api.verifyConnections();
-      set({ skills });
-      await get().loadSkillConnections(skillId);
-      refreshActivity();
+      await refreshAfterConnectionOp(skillId);
     } catch (e) {
       toast().show("操作失败", "error");
       console.error(e);
@@ -246,10 +248,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   adoptRealEntry: async (skillId, agentId, librarySourceId) => {
     try {
       await api.adoptRealEntry(skillId, agentId, librarySourceId);
-      const skills = await api.verifyConnections();
-      set({ skills });
-      await get().loadSkillConnections(skillId);
-      refreshActivity();
+      await refreshAfterConnectionOp(skillId);
       toast().show("真实入口已移动到库源，并保留软链");
     } catch (e) {
       toast().show("收纳失败", "error");
@@ -276,13 +275,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
         await api.batchConnect([], pending.skillIds, pending.agentId, true);
         toast().show(`已断开 ${pending.skillIds.length} 个 Skill`, "info");
       }
-      const skills = await api.verifyConnections();
-      set({ skills });
-      const selectedSkillId = get().selectedSkillId;
-      if (selectedSkillId) {
-        await get().loadSkillConnections(selectedSkillId);
-      }
-      refreshActivity();
+      await refreshAfterConnectionOp();
     } catch (e) {
       toast().show("操作失败", "error");
       console.error(e);
@@ -294,6 +287,8 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   requestBatchSharedDisconnect: (confirmation) => {
     set({ connectionConfirmation: confirmation });
   },
+
+  refreshAfterConnectionOp: (skillId) => refreshAfterConnectionOp(skillId),
 
   requestSkillDelete: (confirmation) => {
     set({ skillDeleteConfirmation: confirmation });
@@ -319,23 +314,50 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     }
   },
 
-  selectSkill: (id) => {
-    set({ selectedSkillId: id, skillContent: "", skillFiles: [], skillConnections: [], selectedFilePath: null, selectedFileContent: "", editingSkill: false, skillAudit: null });
-    if (id) {
-      get().loadSkillContent(id);
-      get().loadSkillFiles(id);
-      get().loadSkillConnections(id);
-      get().loadSkillAudit(id);
+  requestBatchDelete: (skillIds) => {
+    set({ batchDeleteIds: skillIds });
+  },
+
+  cancelBatchDelete: () => {
+    if (get().batchDeleting) return;
+    set({ batchDeleteIds: null });
+  },
+
+  confirmBatchDelete: async () => {
+    const pending = get().batchDeleteIds;
+    if (!pending || get().batchDeleting) return;
+
+    set({ batchDeleting: true });
+    try {
+      const failed = await api.batchDeleteSkills(pending);
+      const okCount = pending.length - failed.length;
+      set((state) => ({
+        skills: state.skills.filter((s) => !pending.includes(s.id) || failed.includes(s.id)),
+        batchDeleteIds: null,
+      }));
+      if (get().selectedSkillId && pending.includes(get().selectedSkillId!) && !failed.includes(get().selectedSkillId!)) {
+        get().selectSkill(null);
+      }
+      if (failed.length > 0) {
+        toast().show(tr("skills.batchDelete.failed", { count: failed.length }), "error");
+      } else {
+        toast().show(tr("skills.batchDelete.done", { count: okCount }));
+      }
+      refreshActivity();
+    } catch (e) {
+      toast().show("批量删除失败", "error");
+      console.error(e);
+    } finally {
+      set({ batchDeleting: false });
     }
   },
 
-  loadSkillContent: async (id) => {
-    set({ loadingContent: true });
-    try {
-      const content = await api.readSkillFile(id);
-      set({ skillContent: content, loadingContent: false });
-    } catch {
-      set({ skillContent: "（无法读取 SKILL.md）", loadingContent: false });
+  selectSkill: (id) => {
+    set({ selectedSkillId: id, skillFiles: [], skillConnections: [], skillAudit: null });
+    if (id) {
+      get().loadSkillFiles(id);
+      get().loadSkillConnections(id);
+      get().loadSkillAudit(id);
     }
   },
 
@@ -345,24 +367,6 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       set({ skillFiles: files });
     } catch { /* ignore */ }
   },
-
-  loadFileContent: async (skillId, filePath) => {
-    set({ selectedFilePath: filePath, selectedFileContent: "" });
-    try {
-      const content = await api.readSkillFileByPath(skillId, filePath);
-      set({ selectedFileContent: content });
-    } catch {
-      set({ selectedFileContent: "（无法读取文件）" });
-    }
-  },
-
-  saveSkillContent: async (id, content) => {
-    await api.writeSkillFile(id, content);
-    set({ skillContent: content, editingSkill: false });
-    toast().show("SKILL.md 已保存");
-  },
-
-  setEditingSkill: (v) => set({ editingSkill: v }),
 
   loadSkillAudit: async (id) => {
     try {

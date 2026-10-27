@@ -44,20 +44,20 @@ export const adoptRealEntry = (
 ) => invoke<SkillConnectionState>("adopt_real_entry", { skillId, agentId, librarySourceId });
 
 // skill 文件读写
-export const readSkillFile = (skillId: string) =>
-  invoke<string>("read_skill_file", { skillId });
-
-export const writeSkillFile = (skillId: string, content: string) =>
-  invoke("write_skill_file", { skillId, content });
-
 export const deleteSkill = (skillId: string) =>
   invoke("delete_skill", { skillId });
+
+export const batchDeleteSkills = (skillIds: string[]) =>
+  invoke<string[]>("batch_delete_skills", { skillIds });
 
 export const updateSkillTags = (skillId: string, tags: string[]) =>
   invoke("update_skill_tags", { skillId, tags });
 
 export const toggleSkillEnabled = (skillId: string, enabled: boolean) =>
   invoke("toggle_skill_enabled", { skillId, enabled });
+
+export const batchToggleSkillEnabled = (skillIds: string[], enabled: boolean) =>
+  invoke<string[]>("batch_toggle_skill_enabled", { skillIds, enabled });
 
 export const listSkillFiles = (skillId: string) =>
   invoke<import("../types").SkillFileEntry[]>("list_skill_files", { skillId });
@@ -84,6 +84,21 @@ export const installSkill = (
   librarySourceId: string,
   overrideAudit = false,
 ) => invoke<InstallResult>("install_skill", { source, librarySourceId, overrideAudit });
+
+/** 安装到自定义目录（项目 .agents/skills 或用户指定路径） */
+export const installSkillToDir = (
+  source: SkillSourceInput,
+  targetDir: string,
+  overrideAudit = false,
+) => invoke<InstallResult>("install_skill_to_dir", { source, targetDir, overrideAudit });
+
+/** 选择本地 Skill 压缩包（zip） */
+export const pickSkillArchive = () =>
+  invoke<string | null>("pick_skill_archive");
+
+/** 选择本地 Skill 目录 */
+export const pickSkillFolder = () =>
+  invoke<string | null>("pick_skill_folder");
 
 export const updateSkill = (
   skillId: string,
@@ -297,6 +312,12 @@ import type { AppInfo } from "../types";
 
 export const getAppInfo = () =>
   invoke<AppInfo>("get_app_info");
+
+export const getSetting = (key: string) =>
+  invoke<string | null>("get_setting", { key });
+
+export const setSetting = (key: string, value: string) =>
+  invoke("set_setting", { key, value });
 
 export const isAutostartEnabled = () =>
   invoke<boolean>("is_autostart_enabled");

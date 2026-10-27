@@ -8,11 +8,17 @@ import type {
 export const DEFAULT_MCP_REGISTRY_URL =
   "https://registry.modelcontextprotocol.io/v0.1/servers";
 
+/** 官方技能源：Anthropic 官方技能仓库（后端按 GitHub 仓库 tarball 解析） */
+export const DEFAULT_SKILL_SOURCE_URL = "https://github.com/anthropics/skills";
+
 export type MarketplaceKind = "all" | "skill" | "mcp";
 
 export type MarketplaceItem =
   | { kind: "skill"; entry: MarketplaceSkill }
   | { kind: "mcp"; entry: MarketplaceMcp };
+
+/** 条目归属的目录源（用于卡片角标与刷新提示） */
+export type MarketplaceOrigin = "official" | "custom";
 
 export interface MarketplaceFilter {
   query: string;
@@ -26,6 +32,27 @@ export function marketplaceItems(catalog: MarketplaceCatalog | null): Marketplac
     ...catalog.skills.map((entry) => ({ kind: "skill" as const, entry })),
     ...catalog.mcps.map((entry) => ({ kind: "mcp" as const, entry })),
   ];
+}
+
+/** 合并官方与自定义目录：同 id 条目自定义目录优先（团队清单可覆盖公共条目）。 */
+export function mergeCatalogs(
+  official: MarketplaceCatalog | null,
+  custom: MarketplaceCatalog | null,
+): MarketplaceCatalog | null {
+  if (!official) return custom;
+  if (!custom) return official;
+  const customIds = new Set([
+    ...custom.skills.map((entry) => entry.id),
+    ...custom.mcps.map((entry) => entry.id),
+  ]);
+  return {
+    source_kind: "merged",
+    source_url: official.source_url,
+    name: official.name,
+    synced_at: official.synced_at > custom.synced_at ? official.synced_at : custom.synced_at,
+    skills: [...custom.skills, ...official.skills.filter((entry) => !customIds.has(entry.id))],
+    mcps: [...custom.mcps, ...official.mcps.filter((entry) => !customIds.has(entry.id))],
+  };
 }
 
 export function filterMarketplaceItems(

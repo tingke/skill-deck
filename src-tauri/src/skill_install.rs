@@ -144,20 +144,56 @@ fn validate_git_url(url: &str) -> Result<(), String> {
     }
 }
 
-fn fetch_git(url: &str, dest: &Path) -> Result<(), String> {
+/// 读取用户配置的 GitHub 访问令牌（Settings 中保存于 settings 表）
+fn github_token(conn: &Connection) -> Option<String> {
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = 'github_token'",
+        [],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+    .map(|token| token.trim().to_string())
+    .filter(|token| !token.is_empty())
+}
+
+/// 对 github.com 的 https 地址注入访问令牌，可显著提升国内访问成功率。
+/// 其他 host 或非 https 地址原样返回。
+fn inject_github_token(url: &str, token: Option<&str>) -> String {
+    match token {
+        Some(token) if url.starts_with("https://github.com/") => {
+            format!("https://x-access-token:{}@github.com/{}", token, &url["https://github.com/".len()..])
+        }
+        _ => url.to_string(),
+    }
+}
+
+fn fetch_git(url: &str, dest: &Path, token: Option<&str>) -> Result<(), String> {
     validate_git_url(url)?;
+    let effective_url = inject_github_token(url, token);
     let output = std::process::Command::new("git")
+        .arg("-c")
+        .arg("http.lowSpeedLimit=1024")
+        .arg("-c")
+        .arg("http.lowSpeedTime=30")
         .arg("clone")
         .arg("--depth")
         .arg("1")
         .arg("--")
-        .arg(url)
+        .arg(&effective_url)
         .arg(dest)
         .output()
         .map_err(|e| format!("无法执行 git（请确认已安装）: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(format!("git clone 失败: {}", stderr));
+        // 令牌注入的 URL 不回显到错误信息里
+        let hint = if url.starts_with("https://github.com/") && token.is_some() {
+            "\n（已使用配置的 GitHub 访问令牌；可到 设置 检查令牌是否有效）"
+        } else if url.starts_with("https://github.com/") {
+            "\n（国内访问 GitHub 可能不稳定；可到 设置 配置 GitHub 访问令牌提升成功率）"
+        } else {
+            ""
+        };
+        return Err(format!("git clone 失败: {}{}", stderr, hint));
     }
     // .git 元数据不参与安装内容
     let _ = fs::remove_dir_all(dest.join(".git"));
@@ -226,9 +262,9 @@ fn fetch_path(source_dir: &str, dest: &Path) -> Result<(), String> {
     copy_dir(&src, dest)
 }
 
-fn fetch_source(source: &SkillSourceInput, dest: &Path) -> Result<(), String> {
+fn fetch_source(source: &SkillSourceInput, dest: &Path, token: Option<&str>) -> Result<(), String> {
     match source.kind.as_str() {
-        "git" => fetch_git(&source.source_ref, dest),
+        "git" => fetch_git(&source.source_ref, dest, token),
         "archive" => fetch_archive(&source.source_ref, dest),
         "path" => fetch_path(&source.source_ref, dest),
         other => Err(format!("不支持的来源类型: {}", other)),
@@ -428,17 +464,44 @@ pub fn install_skill_impl(
     library_source_id: &str,
     override_audit: bool,
 ) -> Result<InstallResult, String> {
-    let library = load_library_source(conn, library_source_id)?;
-    if !library.enabled {
-        return Err(format!("库源已停用: {}", library.name));
-    }
-    let library_dir = resolve_path(&library.path);
+    install_skill_with_target(conn, source, library_source_id, None, override_audit)
+}
+
+/// 带 target_dir 的安装变体：提供 target_dir 时安装到该目录（项目 .agents/skills 或
+/// 自定义路径），skill 以 `custom:` 前缀登记；否则走库源安装。
+pub fn install_skill_with_target(
+    conn: &Connection,
+    source: &SkillSourceInput,
+    library_source_id: &str,
+    target_dir: Option<String>,
+    override_audit: bool,
+) -> Result<InstallResult, String> {
+    let (library_dir, library_label, id_prefix) = match target_dir.as_deref() {
+        Some(dir) => {
+            let resolved = resolve_path(dir);
+            if resolved.file_name().is_none() {
+                return Err(format!("无效的安装目录: {}", dir));
+            }
+            let label = resolved
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| "自定义".to_string());
+            (resolved, label, "custom".to_string())
+        }
+        None => {
+            let library = load_library_source(conn, library_source_id)?;
+            if !library.enabled {
+                return Err(format!("库源已停用: {}", library.name));
+            }
+            (resolve_path(&library.path), library.name.clone(), library.id.clone())
+        }
+    };
     fs::create_dir_all(&library_dir).map_err(|e| format!("创建库源目录失败: {}", e))?;
 
     let staging = StagingGuard::new("install");
     let fetch_dir = staging.0.join("fetch");
     fs::create_dir_all(&fetch_dir).map_err(|e| format!("创建暂存目录失败: {}", e))?;
-    fetch_source(source, &fetch_dir)?;
+    fetch_source(source, &fetch_dir, github_token(conn).as_deref())?;
     let root = locate_skill_root(&fetch_dir, source.subdir.as_deref())?;
     let skill_name = skill_name_for(&root, &fetch_dir, source);
     let target = library_dir.join(&skill_name);
@@ -476,17 +539,23 @@ pub fn install_skill_impl(
     })?;
 
     let installed_hash = scanner::directory_hash(&target);
-    let scan = scanner::scan_skill_dir(&target, &library.name)
+    let scan = scanner::scan_skill_dir(&target, &library_label)
         .ok_or_else(|| "安装后未找到 SKILL.md".to_string())?;
-    // 刷新该库源投影，拿到稳定 skill id
-    scanner::scan_library_source(
-        conn,
-        &library.id,
-        &library.name,
-        &library_dir.to_string_lossy(),
-    );
-    let skill_id = find_installed_skill_id(conn, &target)?
-        .ok_or_else(|| format!("安装完成但未能登记 skill: {}", target.display()))?;
+    // 库源安装：刷新该库源投影拿稳定 skill id；自定义目录安装：直接以 custom: 前缀登记
+    let skill_id = if target_dir.is_some() {
+        let custom_id = format!("{}:{}", id_prefix, scan.original_dir);
+        register_custom_skill(conn, &custom_id, &scan, &target, &installed_hash)?;
+        custom_id
+    } else {
+        scanner::scan_library_source(
+            conn,
+            &id_prefix,
+            &library_label,
+            &library_dir.to_string_lossy(),
+        );
+        find_installed_skill_id(conn, &target)?
+            .ok_or_else(|| format!("安装完成但未能登记 skill: {}", target.display()))?
+    };
 
     upsert_origin(
         conn,
@@ -506,7 +575,7 @@ pub fn install_skill_impl(
             "{} ({}) -> {}{}",
             skill_name,
             source.kind,
-            library.name,
+            library_label,
             if override_audit {
                 " [override-audit]"
             } else {
@@ -525,9 +594,61 @@ pub fn install_skill_impl(
     })
 }
 
+/// 自定义目录安装的技能登记：直接写 skills 表（custom: 前缀 id），不刷新库源投影。
+/// 同 id 重复安装时按冲突处理，不会走到这里；存在同路径旧记录则覆盖刷新。
+fn register_custom_skill(
+    conn: &Connection,
+    custom_id: &str,
+    scan: &scanner::ScanResult,
+    target: &Path,
+    installed_hash: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO skills (id, name, source_lib, path, description, content_hash, author, license, version, permissions, enabled, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+         ON CONFLICT(id) DO UPDATE SET
+           name=excluded.name, source_lib=excluded.source_lib, path=excluded.path,
+           description=excluded.description, content_hash=excluded.content_hash,
+           author=excluded.author, license=excluded.license, version=excluded.version,
+           permissions=excluded.permissions, updated_at=excluded.updated_at",
+        params![
+            custom_id,
+            scan.name,
+            scan.source_lib,
+            target.to_string_lossy().to_string(),
+            scan.description,
+            Some(installed_hash.to_string()),
+            scan.author,
+            scan.license,
+            scan.version,
+            serde_json::to_string(&scan.permissions).unwrap_or_else(|_| "[]".into()),
+            !scan.disabled as i32,
+            now_iso(),
+            now_iso(),
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    // 初始化连接状态行（如果不存在）
+    let agents: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT id FROM agents").map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.flatten().collect()
+    };
+    for agent in agents {
+        conn.execute(
+            "INSERT OR IGNORE INTO connections (skill_id, runtime, linked, updated_at) VALUES (?1, ?2, 0, ?3)",
+            params![custom_id, agent, now_iso()],
+        )
+        .ok();
+    }
+    Ok(())
+}
+
 // ============ 更新 ============
 
-fn source_directory_hash(source: &SkillSourceInput) -> Result<String, String> {
+fn source_directory_hash(conn: &Connection, source: &SkillSourceInput) -> Result<String, String> {
     if source.kind == "path" {
         let dir = resolve_path(&source.source_ref);
         if !dir.is_dir() {
@@ -538,7 +659,7 @@ fn source_directory_hash(source: &SkillSourceInput) -> Result<String, String> {
     let staging = StagingGuard::new("check");
     let fetch_dir = staging.0.join("fetch");
     fs::create_dir_all(&fetch_dir).map_err(|e| format!("创建暂存目录失败: {}", e))?;
-    fetch_source(source, &fetch_dir)?;
+    fetch_source(source, &fetch_dir, github_token(conn).as_deref())?;
     let root = locate_skill_root(&fetch_dir, source.subdir.as_deref())?;
     Ok(scanner::directory_hash(&root))
 }
@@ -579,7 +700,7 @@ pub fn check_skill_updates_impl(
             };
 
             let source = source_from_origin(origin_type, origin_ref);
-            let latest_hash = source_directory_hash(&source);
+            let latest_hash = source_directory_hash(conn, &source);
             let local_hash = scanner::directory_hash(Path::new(&path));
 
             match latest_hash {
@@ -630,7 +751,7 @@ pub fn update_skill_impl(
     let staging = StagingGuard::new("update");
     let fetch_dir = staging.0.join("fetch");
     fs::create_dir_all(&fetch_dir).map_err(|e| format!("创建暂存目录失败: {}", e))?;
-    fetch_source(&source, &fetch_dir)?;
+    fetch_source(&source, &fetch_dir, github_token(conn).as_deref())?;
     let root = locate_skill_root(&fetch_dir, source.subdir.as_deref())?;
     let latest_hash = scanner::directory_hash(&root);
 
@@ -746,7 +867,39 @@ pub fn install_skill(
     override_audit: bool,
 ) -> Result<InstallResult, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    install_skill_impl(&conn, &source, &library_source_id, override_audit)
+    install_skill_with_target(&conn, &source, &library_source_id, None, override_audit)
+}
+
+/// 安装到自定义目录（项目 `.agents/skills` 或用户指定路径），不占用库源。
+#[tauri::command(async)]
+pub fn install_skill_to_dir(
+    db: State<DbState>,
+    source: SkillSourceInput,
+    target_dir: String,
+    override_audit: bool,
+) -> Result<InstallResult, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    // library_source_id 仅用于缺少 target_dir 时的回退语义；自定义目录安装时传占位值
+    install_skill_with_target(&conn, &source, "custom", Some(target_dir), override_audit)
+}
+
+/// 选择本地 Skill 压缩包（zip）
+#[tauri::command]
+pub fn pick_skill_archive() -> Result<Option<String>, String> {
+    let file = rfd::FileDialog::new()
+        .set_title("选择 Skill 压缩包")
+        .add_filter("Skill 压缩包", &["zip"])
+        .pick_file();
+    Ok(file.map(|p| p.to_string_lossy().to_string()))
+}
+
+/// 选择本地 Skill 目录（文件夹）
+#[tauri::command]
+pub fn pick_skill_folder() -> Result<Option<String>, String> {
+    let folder = rfd::FileDialog::new()
+        .set_title("选择 Skill 文件夹")
+        .pick_folder();
+    Ok(folder.map(|p| p.to_string_lossy().to_string()))
 }
 
 #[tauri::command(async)]
@@ -833,6 +986,9 @@ mod tests {
              CREATE TABLE activity_log (
                 id INTEGER PRIMARY KEY, action TEXT NOT NULL, detail TEXT, created_at TEXT NOT NULL
              );
+             CREATE TABLE settings (
+                key TEXT PRIMARY KEY, value TEXT
+             );
              INSERT INTO agents (id) VALUES ('claude');",
         )
         .unwrap();
@@ -843,6 +999,46 @@ mod tests {
         )
         .unwrap();
         conn
+    }
+
+    #[test]
+    fn github_token_injection_only_applies_to_github_https() {
+        assert_eq!(
+            inject_github_token("https://github.com/owner/repo", Some("tok")),
+            "https://x-access-token:tok@github.com/owner/repo"
+        );
+        assert_eq!(
+            inject_github_token("https://gitlab.com/owner/repo", Some("tok")),
+            "https://gitlab.com/owner/repo"
+        );
+        assert_eq!(
+            inject_github_token("https://github.com/owner/repo", None),
+            "https://github.com/owner/repo"
+        );
+        assert_eq!(
+            inject_github_token("git@owner/repo.git", Some("tok")),
+            "git@owner/repo.git"
+        );
+    }
+
+    #[test]
+    fn github_token_read_from_settings_and_ignores_blank() {
+        let root = temp_root();
+        let conn = test_db(&root.0.join("library"));
+        assert_eq!(github_token(&conn), None);
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('github_token', '  ')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(github_token(&conn), None);
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('github_token', 'ghp_x')
+             ON CONFLICT(key) DO UPDATE SET value = 'ghp_x'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(github_token(&conn), Some("ghp_x".to_string()));
     }
 
     #[test]
@@ -876,6 +1072,77 @@ mod tests {
             )
             .unwrap();
         assert_eq!(origin, ("path".to_string(), "1.0.0".to_string()));
+    }
+
+    #[test]
+    fn installs_to_custom_target_dir_without_library() {
+        let root = temp_root();
+        let source = root.0.join("source/demo");
+        write_skill(&source, "demo");
+
+        let conn = test_db(&root.0.join("library"));
+        let target = root.0.join("project/.agents/skills");
+        let result = install_skill_with_target(
+            &conn,
+            &SkillSourceInput {
+                kind: "path".into(),
+                source_ref: source.to_string_lossy().to_string(),
+                subdir: None,
+            },
+            "custom",
+            Some(target.to_string_lossy().to_string()),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.status, "installed");
+        assert_eq!(result.skill_id.as_deref(), Some("custom:demo"));
+        assert!(target.join("demo/SKILL.md").is_file());
+
+        // skills 表登记了路径与来源，审计缓存可查
+        let row: (String, String) = conn
+            .query_row(
+                "SELECT path, source_lib FROM skills WHERE id = 'custom:demo'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row.0, target.join("demo").to_string_lossy().to_string());
+        let audit: String = conn
+            .query_row(
+                "SELECT verdict FROM skill_audits WHERE skill_id = 'custom:demo' ORDER BY id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(audit, "pass");
+    }
+
+    #[test]
+    fn custom_target_conflict_never_overwrites() {
+        let root = temp_root();
+        let source = root.0.join("source/demo");
+        write_skill(&source, "new");
+        let target = root.0.join("project/.agents/skills");
+        write_skill(&target.join("demo"), "old");
+
+        let conn = test_db(&root.0.join("library"));
+        let result = install_skill_with_target(
+            &conn,
+            &SkillSourceInput {
+                kind: "path".into(),
+                source_ref: source.to_string_lossy().to_string(),
+                subdir: None,
+            },
+            "custom",
+            Some(target.to_string_lossy().to_string()),
+            false,
+        )
+        .unwrap();
+        assert_eq!(result.status, "conflict");
+        assert!(fs::read_to_string(target.join("demo/SKILL.md"))
+            .unwrap()
+            .contains("old"));
     }
 
     #[test]
@@ -1085,3 +1352,4 @@ mod tests {
         assert!(!root.0.join("library/demo/local.txt").exists());
     }
 }
+

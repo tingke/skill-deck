@@ -49,16 +49,6 @@ pub(crate) fn agent_skills_path(agent: &AgentRow) -> PathBuf {
     }
 }
 
-pub(crate) fn active_manifest_path(skill_path: &Path) -> Option<PathBuf> {
-    if skill_path.join("SKILL.md").is_file() {
-        Some(skill_path.join("SKILL.md"))
-    } else if skill_path.join("SKILL.md.disabled").is_file() {
-        Some(skill_path.join("SKILL.md.disabled"))
-    } else {
-        None
-    }
-}
-
 pub fn probe_agent_entries(agent: &AgentRow, skills: &[SkillRow]) -> Vec<ConnectionProbe> {
     probe_directory_entries(&agent.id, &agent_skills_path(agent), false, skills)
 }

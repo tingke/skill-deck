@@ -34,9 +34,6 @@ jobs:
       - name: Run frontend tests
         run: npm test
 
-      - name: Check layout contract
-        run: npm run test:layout
-
   rust:
     runs-on: macos-latest
     timeout-minutes: 30

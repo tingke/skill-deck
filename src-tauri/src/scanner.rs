@@ -93,27 +93,51 @@ fn parse_frontmatter(content: &str) -> FrontMatter {
     fm
 }
 
+/// 词边界匹配：避免 "editor"/"rapid"/"running" 这类子串误伤
+fn contains_keyword(haystack: &str, keyword: &str) -> bool {
+    let lower = haystack.to_lowercase();
+    let mut start = 0;
+    while let Some(pos) = lower[start..].find(keyword) {
+        let abs = start + pos;
+        let before_ok = lower[..abs]
+            .chars()
+            .next_back()
+            .map(|c| !c.is_ascii_alphanumeric())
+            .unwrap_or(true);
+        let after = abs + keyword.len();
+        let after_ok = lower[after..]
+            .chars()
+            .next()
+            .map(|c| !c.is_ascii_alphanumeric())
+            .unwrap_or(true);
+        if before_ok && after_ok {
+            return true;
+        }
+        start = after;
+    }
+    false
+}
+
 /// Detect permissions from SKILL.md content
 fn detect_permissions(content: &str, has_scripts: bool) -> Vec<String> {
-    let lower = content.to_lowercase();
     let mut perms = Vec::new();
 
     if has_scripts {
         perms.push("exec".to_string());
     } else {
-        let exec_kw = ["exec", "command", "shell", "bash", "script", "npx", "npm", "python", "cargo", "pip", "run "];
-        if exec_kw.iter().any(|k| lower.contains(k)) {
+        let exec_kw = ["exec", "command", "shell", "bash", "script", "npx", "npm", "python", "cargo", "pip", "run"];
+        if exec_kw.iter().any(|k| contains_keyword(content, k)) {
             perms.push("exec".to_string());
         }
     }
 
     let write_kw = ["write", "create", "modify", "save", "edit", "patch", "apply_patch", "mkdir", "touch"];
-    if write_kw.iter().any(|k| lower.contains(k)) {
+    if write_kw.iter().any(|k| contains_keyword(content, k)) {
         perms.push("file:write".to_string());
     }
 
     let net_kw = ["fetch", "http", "api", "url", "request", "curl", "wget", "endpoint"];
-    if net_kw.iter().any(|k| lower.contains(k)) {
+    if net_kw.iter().any(|k| contains_keyword(content, k)) {
         perms.push("network".to_string());
     }
 
@@ -434,6 +458,30 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn permission_detection_uses_word_boundaries() {
+        // 子串误伤：editor/rapid/running/apis 不应命中 edit/run/api/http
+        let none = detect_permissions(
+            "Use your editor to review the rapid changes. Running tests. Various APIs listed at rapidapi home page.",
+            false,
+        );
+        assert!(none.is_empty(), "substring false positives should not trigger permissions, got {:?}", none);
+
+        // 词边界命中：独立单词应正常检出
+        let all = detect_permissions(
+            "This skill can run any command, edit files, and fetch a url via http.",
+            false,
+        );
+        assert!(all.contains(&"exec".to_string()));
+        assert!(all.contains(&"file:write".to_string()));
+        assert!(all.contains(&"network".to_string()));
+    }
+
+    #[test]
+    fn scripts_directory_always_implies_exec() {
+        assert_eq!(detect_permissions("no keywords at all", true), vec!["exec".to_string()]);
     }
 
     #[test]

@@ -3,10 +3,11 @@ import { useAssetsStore } from "../stores/assets";
 import { useActivityStore } from "../stores/activity";
 import { saveRule, deleteRule, applyRule } from "../lib/tauri";
 import { Plus, Trash2, X, Search, ScrollText, Copy, Check, FileOutput, Edit3, ChevronRight } from "lucide-react";
-import RowMenu from "../components/RowMenu";
 import SearchInput from "../components/SearchInput";
+import { useViewMode } from "../lib/useViewMode";
 import ViewToggle from "../components/ViewToggle";
 import PageHeader, { ContentTitle } from "../components/PageHeader";
+import DetailDrawer from "../components/DetailDrawer";
 import type { Rule } from "../types";
 import { PathButton } from "../components/ExtList";
 import { useToastStore } from "../stores/toast";
@@ -20,8 +21,9 @@ export default function RulesView() {
   const t = useT();
   const { rules, loadRules } = useAssetsStore();
   const [query, setQuery] = useState("");
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useViewMode("rules");
   const [editing, setEditing] = useState<Rule | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
   const deleteConfirmation = useDeleteConfirmation();
 
  const handleDelete = async (id: number) => {
@@ -43,6 +45,7 @@ export default function RulesView() {
       r.title.toLowerCase().includes(query.toLowerCase()) ||
       r.content.toLowerCase().includes(query.toLowerCase()),
   );
+  const detailRule = detailId !== null ? rules.find((r) => r.id === detailId) ?? null : null;
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -98,8 +101,8 @@ export default function RulesView() {
               {filtered.map((r) => (
                 <button
                   key={r.id}
-                  onClick={() => setEditing(r)}
-                  className="list-row list-row--generic"
+                  onClick={() => setDetailId(r.id)}
+                  className={"list-row list-row--generic" + (detailId === r.id ? " list-row--selected" : "")}
                 >
                   <span className="list-row__name">{r.title}</span>
                   <span className="list-row__desc font-mono">{r.content}</span>
@@ -113,7 +116,11 @@ export default function RulesView() {
           ) : (
           <div className="px-6 pb-6 card-grid">
             {filtered.map((r) => (
-              <div key={r.id} className="card p-4">
+              <div
+                key={r.id}
+                onClick={() => setDetailId(r.id)}
+                className="card card-hover p-4 cursor-pointer transition-colors"
+              >
                 <div className="flex items-start justify-between">
                   <div className="min-w-0">
                     <h3 className="text-sm font-semibold text-heading truncate">{r.title}</h3>
@@ -122,29 +129,7 @@ export default function RulesView() {
                     }`}>
                       {r.platform === "codex" ? t("rules.platformCodex") : t("rules.platformClaude")}
                     </span>
-                    {r.target_path && <div className="inline-block align-middle ml-1"><PathButton path={r.target_path} /></div>}
                   </div>
-                 <div className="flex items-center gap-1 shrink-0 ml-2">
-                   <button
-                     onClick={() => handleApply(r.id)}
-                     title={t("rules.writeTooltip")}
-                     className="btn-icon"
-                   >
-                     <FileOutput size={14} />
-                   </button>
-                   <RowMenu
-                     ariaLabel={t("common.more")}
-                     items={[
-                       { label: t("common.edit"), icon: <Edit3 size={13} />, onSelect: () => setEditing(r) },
-                       {
-                         label: t("common.delete"),
-                         icon: <Trash2 size={13} />,
-                         danger: true,
-                         onSelect: () => deleteConfirmation.request(r.title, () => handleDelete(r.id)),
-                       },
-                     ]}
-                   />
-                 </div>
                 </div>
                 <p className="text-xs text-faint mt-1.5 line-clamp-3 font-mono">{r.content}</p>
               </div>
@@ -154,6 +139,71 @@ export default function RulesView() {
           </>
         )}
       </div>
+
+      {/* ===== 规则详情抽屉 ===== */}
+      <DetailDrawer
+        open={detailRule !== null}
+        onClose={() => setDetailId(null)}
+        testId="rule-detail-drawer"
+        fillBody
+        icon={<ScrollText size={18} className="text-faint shrink-0" />}
+        title={detailRule?.title ?? ""}
+        subtitle={
+          detailRule && (
+            <span className="flex items-center gap-1.5">
+              <span className={"badge " + (detailRule.platform === "codex" ? "bg-green-50 text-green-600" : "bg-orange-50 text-orange-600")}>
+                {detailRule.platform === "codex" ? t("rules.platformCodex") : t("rules.platformClaude")}
+              </span>
+            </span>
+          )
+        }
+        actions={
+          detailRule && (
+            <>
+              <button
+                onClick={() => handleApply(detailRule.id)}
+                className="btn-icon rounded-full bg-surface-2"
+                title={t("rules.writeTooltip")}
+                aria-label={t("rules.writeTooltip")}
+              >
+                <FileOutput size={14} />
+              </button>
+              <button
+                onClick={() => setEditing(detailRule)}
+                className="btn-icon rounded-full bg-surface-2"
+                title={t("common.edit")}
+                aria-label={t("common.edit")}
+              >
+                <Edit3 size={14} />
+              </button>
+              <button
+                onClick={() => deleteConfirmation.request(detailRule.title, () => handleDelete(detailRule.id))}
+                className="btn-icon rounded-full bg-surface-2 text-red-500 hover:text-red-600"
+                title={t("common.delete")}
+                aria-label={t("common.delete")}
+              >
+                <Trash2 size={14} />
+              </button>
+            </>
+          )
+        }
+      >
+        {detailRule && (
+          <div className="flex-1 min-h-0 flex flex-col px-5 py-3.5">
+            <div className="flex items-center mb-2 shrink-0 min-w-0">
+              <span className="text-2xs font-semibold text-faint uppercase tracking-wider">
+                {t("rules.detailContent")}
+              </span>
+              {detailRule.target_path && (
+                <span className="ml-auto inline-flex items-center"><PathButton path={detailRule.target_path} /></span>
+              )}
+            </div>
+            <pre className="flex-1 min-h-0 overflow-y-auto whitespace-pre-wrap break-words text-xs font-mono text-content leading-relaxed rounded-lg bg-surface-2 p-3">
+              {detailRule.content}
+            </pre>
+          </div>
+        )}
+      </DetailDrawer>
 
       {editing && (
         <RuleEditor

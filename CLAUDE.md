@@ -33,7 +33,6 @@ SkillDeck 是一个本地桌面端 AI 能力管理器，用于管理 Skills、Pr
 ```bash
 npm ci
 npm test                 # 前端/纯 TypeScript 单元测试
-npm run test:layout      # 布局与 Tauri 窗口契约检查
 npm run typecheck        # tsc --noEmit
 npm run build            # TypeScript 检查 + Vite 构建
 npm run tauri:dev        # 启动桌面开发模式

@@ -2,21 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AuditFinding } from "../src/types";
 import {
-  auditVerdictMeta,
   needsUserConfirm,
   sortFindingsBySeverity,
   INSTALL_STATUS_META,
   scoreGradeMeta,
 } from "../src/lib/skillAudit";
 import { formatAuditTime } from "../src/lib/auditTime";
-
-test("audit verdict meta maps known verdicts and rejects unknown values", () => {
-  assert.equal(auditVerdictMeta("pass")?.label, "安全");
-  assert.equal(auditVerdictMeta("warn")?.label, "需留意");
-  assert.equal(auditVerdictMeta("block")?.label, "危险");
-  assert.equal(auditVerdictMeta(null), null);
-  assert.equal(auditVerdictMeta("unknown"), null);
-});
 
 test("only gated statuses require user confirmation before override", () => {
   assert.equal(needsUserConfirm("audit_blocked"), true);

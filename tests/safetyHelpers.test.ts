@@ -5,16 +5,19 @@ import {
   RULE_EXPLANATIONS,
   RULE_GROUP_META,
   auditRiskRank,
+  auditVerdictMeta,
   averageAuditScore,
   auditStats,
   mergeFindings,
   ruleExplanation,
 } from "../src/lib/skillAudit";
 
-test("verdict labels use plain-language terms", () => {
+test("verdict labels use plain-language terms and reject unknown values", () => {
   assert.equal(AUDIT_VERDICT_META.pass.label, "安全");
   assert.equal(AUDIT_VERDICT_META.warn.label, "需留意");
   assert.equal(AUDIT_VERDICT_META.block.label, "危险");
+  assert.equal(auditVerdictMeta(null), null);
+  assert.equal(auditVerdictMeta("unknown"), null);
 });
 
 test("every known audit rule has a plain-language explanation and group", () => {

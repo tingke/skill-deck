@@ -46,7 +46,6 @@
 | `npm run dev` | 启动 Vite 前端开发服务 |
 | `npm run tauri:dev` | 启动 Tauri 桌面开发模式 |
 | `npm test` | esbuild 打包测试后由 Node test runner 执行 |
-| `npm run test:layout` | 检查布局源码契约和 Tauri 窗口契约 |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build` | TypeScript 检查并构建前端 |
 | `npm run release:prepare -- X.Y.Z` | 同步全部发布版本字段，并把 changelog `Unreleased` 转成正式版本小节 |
@@ -59,7 +58,6 @@
 ## 测试与质量工具
 
 - 前端测试：`node:test` + `node:assert/strict`，由 `scripts/run-unit-tests.mjs` 自动发现 `tests/*.test.ts`。
-- 布局契约：`scripts/verify-layout.mjs` 做源代码与配置断言，不是浏览器 E2E。
 - Rust 测试：模块内 `#[cfg(test)]`，当前覆盖迁移、扫描、连接冲突、收纳、观察 Hook、项目工具集、扩展配置写入、工具集导入导出与备份恢复。
 - CI：`.github/workflows/ci.yml`。
 - 当前没有覆盖率阈值、pre-commit hook、格式化检查和 lint 配置。

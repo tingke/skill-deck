@@ -269,6 +269,22 @@ export default function SettingsView() {
   // Language
   const { lang, setLang } = useI18n();
 
+  // GitHub 访问令牌（用于安装/更新 skill 时的 git clone）
+  const [githubToken, setGithubToken] = useState("");
+  const [tokenSaving, setTokenSaving] = useState(false);
+  useEffect(() => { api.getSetting("github_token").then((v) => setGithubToken(v ?? "")).catch(() => {}); }, []);
+  const saveGithubToken = async () => {
+    setTokenSaving(true);
+    try {
+      await api.setSetting("github_token", githubToken.trim());
+      toast().show(t("settings.tokenSaved"));
+    } catch {
+      toast().show(t("toast.failed"), "error");
+    } finally {
+      setTokenSaving(false);
+    }
+  };
+
   // App info + update
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [update, setUpdate] = useState<api.Update | null>(null);
@@ -369,10 +385,10 @@ export default function SettingsView() {
   ];
 
   return (
-    <div className="settings-view">
-      <div className="settings-view__inner mx-auto w-full max-w-5xl px-6 py-6">
-        <PageHeader title={t("settings.title")} />
-
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <PageHeader title={t("settings.title")} />
+      <div className="settings-view">
+        <div className="settings-view__inner mx-auto w-full max-w-5xl px-6 py-6">
         <div className="settings-grid">
         {/* General */}
         <Section icon={<Power size={14} />} title={t("settings.general")}>
@@ -422,6 +438,30 @@ export default function SettingsView() {
 
         {/* Data */}
         <Section icon={<Database size={14} />} title={t("settings.data")}>
+          <div className="py-1.5 space-y-2">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-muted">{t("settings.githubToken")}</p>
+              <p className="text-[13px] text-faint mt-0.5 leading-relaxed">{t("settings.githubTokenDesc")}</p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="password"
+                value={githubToken}
+                onChange={(e) => setGithubToken(e.target.value)}
+                placeholder="ghp_…"
+                autoComplete="off"
+                className="input w-[220px]"
+              />
+              <button
+                onClick={saveGithubToken}
+                disabled={tokenSaving}
+                className="btn btn-outline"
+              >
+                {tokenSaving ? <Loader2 size={14} className="animate-spin" /> : null}
+                {t("settings.tokenSave")}
+              </button>
+            </div>
+          </div>
           <Row label={t("settings.backup")} desc={t("settings.backupDesc")}>
             <button onClick={handleBackup}
               className="btn btn-outline">
@@ -471,6 +511,7 @@ export default function SettingsView() {
 
         </div>
       </div>
+      </div>
 
       <UpdateDialog
         open={updateDialogOpen && !!update}
@@ -508,7 +549,7 @@ function Section({
         <h3 className="text-sm font-semibold text-content">{title}</h3>
         {action && <div className="ml-auto shrink-0 flex items-center">{action}</div>}
       </header>
-      <div className="settings-section__body px-5 py-3 divide-y divide-border-subtle">{children}</div>
+      <div className="settings-section__body flex flex-col justify-center px-5 py-3 divide-y divide-border-subtle">{children}</div>
     </section>
   );
 }

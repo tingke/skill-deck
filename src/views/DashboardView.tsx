@@ -207,7 +207,7 @@ export default function DashboardView() {
       key: "no-skills",
       main: t(asKey("dashboard.todoNoSkills")),
       sub: t(asKey("dashboard.todoNoSkillsSub")),
-      button: { label: t(asKey("dashboard.todoGoMarket")), onClick: () => setView("market") },
+      button: { label: t("dashboard.goSkills"), onClick: () => setView("skills") },
     });
   }
   if (todoActions.length === 0) {

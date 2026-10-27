@@ -20,6 +20,7 @@ import { useDeleteConfirmation } from "../lib/deleteConfirmation";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
 import PageHeader from "../components/PageHeader";
 import RowMenu from "../components/RowMenu";
+import { useViewMode } from "../lib/useViewMode";
 import ViewToggle from "../components/ViewToggle";
 import SearchInput from "../components/SearchInput";
 import { ContentTitle } from "../components/PageHeader";
@@ -66,7 +67,7 @@ export default function ProjectsView() {
   const agentActivity = useActivityStore((s) => s.agentActivity);
   const loadAgentActivity = useActivityStore((s) => s.loadAgentActivity);
   const [editing, setEditing] = useState<ProjectRow | null>(null);
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useViewMode("projects");
   const [query, setQuery] = useState("");
   const [presetProjectId, setPresetProjectId] = useState<string | null>(null);
   const [drifts, setDrifts] = useState<ProjectPackageDrift[]>([]);

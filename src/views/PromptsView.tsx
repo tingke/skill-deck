@@ -10,6 +10,7 @@ import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
 import DetailDrawer from "../components/DetailDrawer";
 import PageHeader, { ContentTitle } from "../components/PageHeader";
 import SearchInput from "../components/SearchInput";
+import { useViewMode } from "../lib/useViewMode";
 import ViewToggle from "../components/ViewToggle";
 import { ChevronRight } from "lucide-react";
 import { EmptyState } from "./MCPView";
@@ -23,7 +24,7 @@ export default function PromptsView() {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [editing, setEditing] = useState<Prompt | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useViewMode("prompts");
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const deleteConfirmation = useDeleteConfirmation();
   const detailPrompt = detailId ? prompts.find((p) => p.id === detailId) ?? null : null;
@@ -173,6 +174,7 @@ export default function PromptsView() {
         open={!!detailPrompt}
         onClose={() => setDetailId(null)}
         testId="prompt-detail-drawer"
+        fillBody
         icon={<FileText size={18} className="text-faint shrink-0" />}
         title={detailPrompt?.title ?? ""}
         subtitle={
@@ -183,30 +185,6 @@ export default function PromptsView() {
         actions={
           detailPrompt && (
             <>
-              <button
-                onClick={async () => {
-                  await navigator.clipboard.writeText(detailPrompt.content);
-                  setCopiedId(detailPrompt.id);
-                  setTimeout(() => setCopiedId(null), 1500);
-                }}
-                className="btn-icon rounded-full bg-surface-2"
-                title={copiedId === detailPrompt.id ? t("common.copied") : t("common.copyAll")}
-                aria-label={t("common.copyAll")}
-              >
-                {copiedId === detailPrompt.id ? <Check size={14} /> : <Copy size={14} />}
-              </button>
-              <button
-                onClick={() =>
-                  handleApplyToRule(detailPrompt).catch((err) => {
-                    toast().show(t("prompts.applyToRuleFailed", { msg: String(err) }), "error");
-                  })
-                }
-                className="btn-icon rounded-full bg-surface-2"
-                title={t("prompts.applyToRule")}
-                aria-label={t("prompts.applyToRule")}
-              >
-                <ScrollText size={14} />
-              </button>
               <button
                 onClick={() => setEditing(detailPrompt)}
                 className="btn-icon rounded-full bg-surface-2"
@@ -243,12 +221,40 @@ export default function PromptsView() {
               </section>
             )}
 
-            {/* Full content */}
-            <section className="px-5 py-3.5">
-              <span className="text-2xs font-semibold text-faint uppercase tracking-wider block mb-2">
-                {t("prompts.detailContent")}
-              </span>
-              <pre className="whitespace-pre-wrap break-words text-xs font-mono text-content leading-relaxed rounded-lg bg-surface-2 p-3">
+            {/* Full content：铺满剩余空间，内容区内部滚动 */}
+            <section className="flex-1 min-h-0 flex flex-col px-5 py-3.5">
+              <div className="flex items-center mb-2 shrink-0">
+                <span className="text-2xs font-semibold text-faint uppercase tracking-wider">
+                  {t("prompts.detailContent")}
+                </span>
+                <div className="ml-auto flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() =>
+                      handleApplyToRule(detailPrompt).catch((err) => {
+                        toast().show(t("prompts.applyToRuleFailed", { msg: String(err) }), "error");
+                      })
+                    }
+                    className="btn-icon btn-icon-sm"
+                    title={t("prompts.applyToRule")}
+                    aria-label={t("prompts.applyToRule")}
+                  >
+                    <ScrollText size={16} />
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(detailPrompt.content);
+                      setCopiedId(detailPrompt.id);
+                      setTimeout(() => setCopiedId(null), 1500);
+                    }}
+                    className="btn-icon btn-icon-sm"
+                    title={copiedId === detailPrompt.id ? t("common.copied") : t("common.copyAll")}
+                    aria-label={t("common.copyAll")}
+                  >
+                    {copiedId === detailPrompt.id ? <Check size={16} /> : <Copy size={16} />}
+                  </button>
+                </div>
+              </div>
+              <pre className="flex-1 min-h-0 overflow-y-auto whitespace-pre-wrap break-words text-xs font-mono text-content leading-relaxed rounded-lg bg-surface-2 p-3">
                 {detailPrompt.content}
               </pre>
             </section>

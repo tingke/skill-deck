@@ -17,6 +17,7 @@ export default function DetailDrawer({
   actions,
   headerActions,
   testId,
+  fillBody = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -28,6 +29,8 @@ export default function DetailDrawer({
   /** 顶部操作按钮（图标钮），渲染在标题右侧、关闭钮左边。 */
   headerActions?: ReactNode;
   testId?: string;
+  /** true 时 body 为 flex 容器且不滚动，由 children 自行管理内部滚动 */
+  fillBody?: boolean;
 }) {
   const t = useT();
 
@@ -75,7 +78,7 @@ export default function DetailDrawer({
           </button>
         </header>
 
-        <div className="detail-drawer-body">{children}</div>
+        <div className={"detail-drawer-body" + (fillBody ? " detail-drawer-body--fill" : "")}>{children}</div>
       </aside>
     </div>
   );

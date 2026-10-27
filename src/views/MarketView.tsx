@@ -9,32 +9,29 @@ import {
   ExternalLink,
   Loader2,
   Plug,
+  Plus,
   RefreshCw,
   Search,
-  ShieldCheck,
   Store,
   TriangleAlert,
 } from "lucide-react";
 import type {
   AgentInfo,
-  AuditFinding,
   ExtensionRow,
-  InstallResult,
   LibrarySource,
   MarketplaceMcp,
   MarketplaceSkill,
   Skill,
 } from "../types";
-import { installSkill, saveMcpCmd } from "../lib/tauri";
+import { saveMcpCmd } from "../lib/tauri";
 import {
-  DEFAULT_MCP_REGISTRY_URL,
   applyRequiredInputs,
   filterMarketplaceItems,
   marketplaceItems,
+  mergeCatalogs,
   parseMarketplaceMcpConfig,
   type MarketplaceKind,
 } from "../lib/marketplace";
-import { mergeFindings, ruleExplanation } from "../lib/skillAudit";
 import { useSkillsStore } from "../stores/skills";
 import { useUiStore } from "../stores/ui";
 import { useWorkspaceStore } from "../stores/workspace";
@@ -44,6 +41,7 @@ import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
 import { useMarketplaceStore } from "../stores/marketplace";
 import PageHeader from "../components/PageHeader";
+import SkillInstallDialog, { CheckPanel, CheckPanelTitle, StepLabel } from "../components/skills/SkillInstallDialog";
 
 const toast = () => useToastStore.getState();
 
@@ -59,6 +57,16 @@ function findLocalSkill(skills: Skill[], entry: MarketplaceSkill): Skill | null 
   return skills.find((skill) => skill.name.trim().toLowerCase() === name) ?? null;
 }
 
+/** 搜索防抖：输入即时回显，列表延迟过滤 */
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
+
 export default function MarketView() {
   const t = useT();
   const skills = useSkillsStore((state) => state.skills);
@@ -71,17 +79,30 @@ export default function MarketView() {
   const loadExtensions = useExtensionsStore((state) => state.loadExtensions);
   const loadActivity = useActivityStore((state) => state.loadActivity);
 
-  const sourceMode = useMarketplaceStore((state) => state.sourceMode);
+  const officialMcpCatalog = useMarketplaceStore((state) => state.officialMcpCatalog);
+  const officialSkillCatalog = useMarketplaceStore((state) => state.officialSkillCatalog);
+  const customCatalog = useMarketplaceStore((state) => state.customCatalog);
+  const officialMcpSyncing = useMarketplaceStore((state) => state.officialMcpSyncing);
+  const officialSkillSyncing = useMarketplaceStore((state) => state.officialSkillSyncing);
+  const customSyncing = useMarketplaceStore((state) => state.customSyncing);
+  const officialMcpError = useMarketplaceStore((state) => state.officialMcpError);
+  const officialSkillError = useMarketplaceStore((state) => state.officialSkillError);
+  const customError = useMarketplaceStore((state) => state.customError);
   const manifestUrl = useMarketplaceStore((state) => state.manifestUrl);
-  const catalog = useMarketplaceStore((state) => state.catalog);
-  const syncing = useMarketplaceStore((state) => state.syncing);
-  const setSourceMode = useMarketplaceStore((state) => state.setSourceMode);
+  const autoSynced = useMarketplaceStore((state) => state.autoSynced);
+  const syncOfficialMcps = useMarketplaceStore((state) => state.syncOfficialMcps);
+  const syncOfficialSkills = useMarketplaceStore((state) => state.syncOfficialSkills);
+  const syncCustom = useMarketplaceStore((state) => state.syncCustom);
   const setManifestUrl = useMarketplaceStore((state) => state.setManifestUrl);
-  const syncMarket = useMarketplaceStore((state) => state.sync);
+  const markAutoSynced = useMarketplaceStore((state) => state.markAutoSynced);
+
   const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<MarketplaceKind>("all");
+  const [tab, setTab] = useState<MarketplaceKind>("skill");
   const [skillEntry, setSkillEntry] = useState<MarketplaceSkill | null>(null);
+  const [customInstall, setCustomInstall] = useState(false);
   const [mcpEntry, setMcpEntry] = useState<MarketplaceMcp | null>(null);
+  const [sourceDialogOpen, setSourceDialogOpen] = useState(false);
+  const debouncedQuery = useDebouncedValue(query, 250);
 
   useEffect(() => {
     (async () => {
@@ -94,27 +115,56 @@ export default function MarketView() {
     })();
   }, [loadSkills, loadAgentOptions, loadLibrarySources, loadExtensions]);
 
-  const items = useMemo(() => marketplaceItems(catalog), [catalog]);
+  // 进店自动同步两个官方目录；失败时留内联错误 + 重试，不弹 toast 打扰
+  useEffect(() => {
+    if (!autoSynced) {
+      markAutoSynced();
+      syncOfficialSkills();
+      syncOfficialMcps();
+    }
+  }, [autoSynced, markAutoSynced, syncOfficialSkills, syncOfficialMcps]);
+
+  // 官方技能目录 + 官方工具目录各自与团队目录合并；Tab 直接决定展示哪类条目
+  const skillCatalog = useMemo(
+    () => mergeCatalogs(officialSkillCatalog, customCatalog),
+    [officialSkillCatalog, customCatalog],
+  );
+  const mcpCatalog = useMemo(
+    () => mergeCatalogs(officialMcpCatalog, customCatalog),
+    [officialMcpCatalog, customCatalog],
+  );
+  const allItems = useMemo(
+    () => [...marketplaceItems(skillCatalog), ...marketplaceItems(mcpCatalog)],
+    [skillCatalog, mcpCatalog],
+  );
+  const activeItems = useMemo(
+    () => allItems.filter((item) => item.kind === tab),
+    [allItems, tab],
+  );
   const filtered = useMemo(
-    () => filterMarketplaceItems(items, { query, kind, tag: null }),
-    [items, query, kind],
+    () => filterMarketplaceItems(activeItems, { query: debouncedQuery, kind: "all", tag: null }),
+    [activeItems, debouncedQuery],
   );
 
   const openMcp = (entry: MarketplaceMcp) => {
     setMcpEntry(entry);
   };
 
+  const activeCatalog = tab === "skill" ? skillCatalog : mcpCatalog;
   const catalogTime = useMemo(() => {
-    if (!catalog) return "";
-    const date = new Date(catalog.synced_at);
+    if (!activeCatalog) return "";
+    const date = new Date(activeCatalog.synced_at);
     if (Number.isNaN(date.getTime())) return "";
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }, [catalog]);
+  }, [activeCatalog]);
 
-  const handleBrowse = () => {
-    if (sourceMode !== "registry") setSourceMode("registry");
-    syncMarket();
-  };
+  const loading = tab === "skill"
+    ? officialSkillSyncing && !skillCatalog
+    : officialMcpSyncing && !mcpCatalog;
+  // 错误条只显示当前 Tab 对应的错误
+  const activeError = tab === "skill" ? officialSkillError : officialMcpError;
+  const activeSyncing = tab === "skill" ? officialSkillSyncing : officialMcpSyncing;
+  const retryActive = tab === "skill" ? syncOfficialSkills : syncOfficialMcps;
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden" data-testid="market-view">
@@ -122,121 +172,143 @@ export default function MarketView() {
         title={t("market.title")}
         subtitle={t("market.desc")}
         actions={
-          !catalog ? (
-            <button type="button" className="btn btn-primary" onClick={handleBrowse} disabled={syncing}>
-              {syncing ? <Loader2 size={14} className="animate-spin" /> : null}
-              {t("market.emptyBrowse")} <ArrowRight size={14} />
+          <>
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              onClick={() => setCustomInstall(true)}
+              title={t("market.customDesc")}
+            >
+              <Download size={13} /> {t("market.customInstall")}
             </button>
-          ) : (
-            <>
-              <div className="flex items-center rounded-lg border border-border overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setSourceMode("registry")}
-                  className={"btn btn-sm border-0 " + (sourceMode === "registry" ? "btn-primary" : "btn-ghost")}
-                >
-                  {t("market.sourceRegistry")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSourceMode("custom")}
-                  className={"btn btn-sm border-0 " + (sourceMode === "custom" ? "btn-primary" : "btn-ghost")}
-                >
-                  {t("market.sourceCustom")}
-                </button>
-              </div>
-              <button type="button" className="btn btn-outline btn-sm" onClick={syncMarket} disabled={syncing}>
-                {syncing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-                {syncing ? t("market.syncing") : t("market.refresh")}
+
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              onClick={() => setSourceDialogOpen(true)}
+              title={t("market.sourceDialogTitle")}
+            >
+              <Plus size={13} /> {t("market.addSource")}
+            </button>
+            {activeCatalog && (
+              <button type="button" className="btn btn-outline btn-sm" onClick={retryActive} disabled={activeSyncing}>
+                {activeSyncing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                {activeSyncing ? t("market.syncing") : t("market.refresh")}
               </button>
-            </>
-          )
+            )}
+          </>
         }
       />
-      {!catalog ? (
-        <EmptyMarket
-          onUseCustom={(url) => {
-            setManifestUrl(url);
-            setSourceMode("custom");
-          }}
-        />
-      ) : (
-        <>
 
-          <div className="border-b border-border-subtle bg-surface px-6 py-3 space-y-3">
-            {sourceMode === "custom" && (
-              <div className="space-y-1.5">
-                <input
-                  value={manifestUrl}
-                  onChange={(event) => setManifestUrl(event.target.value)}
-                  placeholder={t("market.manifestPlaceholder")}
-                  spellCheck={false}
-                  className="input font-mono"
-                />
-                <p className="text-2xs text-faint">{t("market.customHint")}</p>
-              </div>
-            )}
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative flex-1 min-w-[240px]">
-                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t("market.searchPlaceholder")}
-                  className="input pl-8"
-                />
-              </div>
-              <div className="flex items-center rounded-lg border border-border overflow-hidden">
-                {(["all", "skill", "mcp"] as MarketplaceKind[]).map((itemKind) => (
-                  <button
-                    key={itemKind}
-                    type="button"
-                    onClick={() => setKind(itemKind)}
-                    className={"btn btn-sm border-0 " + (kind === itemKind ? "btn-primary" : "btn-ghost")}
-                  >
-                    {itemKind === "all"
-                      ? t("market.all", { count: items.length })
-                      : itemKind === "skill"
-                        ? t("market.skills", { count: catalog?.skills.length ?? 0 })
-                        : t("market.mcps", { count: catalog?.mcps.length ?? 0 })}
-                  </button>
-                ))}
-              </div>
-              {catalogTime && (
-                <span className="text-2xs text-faint shrink-0">{t("market.updatedAt", { time: catalogTime })}</span>
-              )}
-            </div>
+      {activeCatalog && !loading && (
+        <div className="border-b border-border-subtle bg-surface px-6 py-3 flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[240px]">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t("market.searchPlaceholder")}
+              className="input pl-8"
+            />
           </div>
-
-          <div className="flex-1 overflow-y-auto p-4">
-            {filtered.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-faint">
-                <Search size={40} className="opacity-30" />
-                <p className="text-sm mt-2">{t("market.noMatch")}</p>
-              </div>
-            ) : (
-              <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-                {filtered.map((item) => (
-                  <MarketCard
-                    key={`${item.kind}:${item.entry.id}`}
-                    item={item}
-                    skills={skills}
-                    extensions={extensions}
-                    onInstallSkill={setSkillEntry}
-                    onOpenMcp={openMcp}
-                  />
-                ))}
-              </div>
-            )}
+          <div className="flex items-center rounded-lg border border-border overflow-hidden">
+            {(["skill", "mcp"] as MarketplaceKind[]).map((itemKind) => (
+              <button
+                key={itemKind}
+                type="button"
+                onClick={() => setTab(itemKind)}
+                className={"btn btn-sm border-0 " + (tab === itemKind ? "btn-primary" : "btn-ghost")}
+              >
+                {itemKind === "skill"
+                  ? t("market.skills", { count: skillCatalog?.skills.length ?? 0 })
+                  : t("market.mcps", { count: mcpCatalog?.mcps.length ?? 0 })}
+              </button>
+            ))}
           </div>
-        </>
+          {customCatalog && (
+            <span className="text-2xs px-1.5 py-0.5 rounded bg-accent-soft text-accent shrink-0">
+              {t("market.customBadge", { name: customCatalog.name })}
+            </span>
+          )}
+          {catalogTime && (
+            <span className="text-2xs text-faint shrink-0">{t("market.updatedAt", { time: catalogTime })}</span>
+          )}
+        </div>
       )}
 
+      {(activeError || customError) && !loading && (
+        <div className="px-6 py-2.5 border-b border-border-subtle bg-red-50/60 dark:bg-red-900/20 flex items-center gap-2">
+          <TriangleAlert size={13} className="text-red-500 shrink-0" />
+          <span className="text-2xs text-red-600 dark:text-red-300 truncate flex-1">
+            {activeError
+              ? t("market.syncFailedShort", { msg: activeError })
+              : t("market.syncFailedShort", { msg: customError ?? "" })}
+          </span>
+          {activeError && (
+            <button type="button" className="btn btn-outline btn-sm shrink-0" onClick={retryActive} disabled={activeSyncing}>
+              {activeSyncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              {t("market.retry")}
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto p-4">
+        {loading ? (
+          <MarketSkeleton />
+        ) : !activeCatalog ? (
+          <EmptyMarket onAddSource={() => setSourceDialogOpen(true)} />
+        ) : filtered.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-faint">
+            <Search size={40} className="opacity-30" />
+            <p className="text-sm mt-2">{t("market.noMatch")}</p>
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+            {filtered.map((item) => (
+              <MarketCard
+                key={`${item.kind}:${item.entry.id}`}
+                item={item}
+                skills={skills}
+                extensions={extensions}
+                onInstallSkill={setSkillEntry}
+                onOpenMcp={openMcp}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <SourceDialog
+        open={sourceDialogOpen}
+        manifestUrl={manifestUrl}
+        customSyncing={customSyncing}
+        customCatalog={customCatalog}
+        onClose={() => setSourceDialogOpen(false)}
+        onChangeUrl={setManifestUrl}
+        onSync={async () => {
+          await syncCustom();
+        }}
+        onRemove={() => {
+          setManifestUrl("");
+          setSourceDialogOpen(false);
+        }}
+      />
+
       <SkillInstallDialog
-        entry={skillEntry}
+        target={
+          skillEntry
+            ? { mode: "entry", entry: skillEntry }
+            : customInstall
+              ? { mode: "custom" }
+              : null
+        }
         libraries={librarySources.filter((library) => library.enabled)}
         skills={skills}
-        onClose={() => setSkillEntry(null)}
+        onClose={() => {
+          setSkillEntry(null);
+          setCustomInstall(false);
+        }}
         onInstalled={async () => {
           await Promise.all([loadSkills(), loadActivity()]);
         }}
@@ -254,82 +326,147 @@ export default function MarketView() {
   );
 }
 
-// ===================== 空态引导 =====================
+// ===================== 骨架屏 =====================
 
-function EmptyMarket({
-  onUseCustom,
+function MarketSkeleton() {
+  return (
+    <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3" data-testid="market-skeleton">
+      {Array.from({ length: 6 }, (_, index) => (
+        <div key={index} className="card p-4 animate-pulse" aria-hidden="true">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-lg bg-surface-2 shrink-0" />
+            <div className="flex-1 space-y-2 pt-0.5">
+              <div className="h-3 rounded bg-surface-2 w-1/3" />
+              <div className="h-2.5 rounded bg-surface-2 w-1/5" />
+            </div>
+          </div>
+          <div className="space-y-1.5 mt-4">
+            <div className="h-2.5 rounded bg-surface-2" />
+            <div className="h-2.5 rounded bg-surface-2 w-5/6" />
+            <div className="h-2.5 rounded bg-surface-2 w-2/3" />
+          </div>
+          <div className="flex items-center justify-between mt-4 pt-3 border-t border-border-subtle">
+            <div className="h-2.5 rounded bg-surface-2 w-1/3" />
+            <div className="h-6 w-14 rounded-lg bg-surface-2" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ===================== 目录来源对话框 =====================
+
+function SourceDialog({
+  open,
+  manifestUrl,
+  customSyncing,
+  customCatalog,
+  onClose,
+  onChangeUrl,
+  onSync,
+  onRemove,
 }: {
-  onUseCustom: (url: string) => void;
+  open: boolean;
+  manifestUrl: string;
+  customSyncing: boolean;
+  customCatalog: MarketplaceCatalogLike | null;
+  onClose: () => void;
+  onChangeUrl: (url: string) => void;
+  onSync: () => Promise<void>;
+  onRemove: () => void;
 }) {
   const t = useT();
-  const { manifestUrl, setManifestUrl } = useMarketplaceStore();
-  const [addingCustom, setAddingCustom] = useState(false);
-
+  if (!open) return null;
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="max-w-[620px] mx-auto text-center pt-14">
-        <div className="w-14 h-14 rounded-2xl bg-accent-soft text-accent flex items-center justify-center mx-auto">
-          <Store size={26} />
-        </div>
-        <h2 className="text-lg font-bold text-heading mt-3">{t("market.emptyTitle")}</h2>
-        <p className="text-xs text-muted mt-1.5 leading-relaxed">{t("market.emptyDesc")}</p>
-
-        <div className="grid grid-cols-2 gap-3 mt-5 text-left">
-          <div className="card p-3.5 flex gap-2.5">
-            <BookOpen size={17} className="text-accent shrink-0 mt-0.5" />
-            <div className="min-w-0">
-              <div className="text-xs font-semibold text-heading">{t("market.emptyConceptSkillTitle")}</div>
-              <p className="text-2xs text-muted mt-0.5 leading-relaxed">{t("market.emptyConceptSkillDesc")}</p>
-            </div>
+    <div className="connection-dialog-overlay" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !customSyncing) onClose();
+    }}>
+      <div role="dialog" aria-modal="true" className="install-dialog" data-testid="market-source-dialog">
+        <div className="flex items-start gap-2.5 mb-3.5 pr-7">
+          <div className="connection-dialog-icon bg-accent-soft text-accent">
+            <Store size={18} />
           </div>
-          <div className="card p-3.5 flex gap-2.5">
-            <Plug size={17} className="text-accent shrink-0 mt-0.5" />
-            <div className="min-w-0">
-              <div className="text-xs font-semibold text-heading">{t("market.emptyConceptToolTitle")}</div>
-              <p className="text-2xs text-muted mt-0.5 leading-relaxed">{t("market.emptyConceptToolDesc")}</p>
-            </div>
+          <div className="min-w-0">
+            <h3 className="connection-dialog-title">{t("market.sourceDialogTitle")}</h3>
+            <p className="connection-dialog-message">{t("market.sourceDialogDesc")}</p>
           </div>
         </div>
 
-        <p className="text-2xs text-faint mt-5 leading-relaxed">{t("market.emptyPrivacy")}</p>
+        <div className="rounded-lg border border-border-subtle bg-surface-2 p-3 mb-3">
+          <div className="flex items-center gap-2">
+            <Plug size={13} className="text-accent shrink-0" />
+            <span className="text-xs font-semibold text-heading flex-1">{t("market.sourceOfficialTitle")}</span>
+            <span className="text-2xs text-faint">{t("market.sourceAlwaysOn")}</span>
+          </div>
+          <p className="text-2xs text-muted mt-1 leading-relaxed">{t("market.sourceOfficialDesc")}</p>
+        </div>
 
-        <div className="mt-5 pb-10">
-          {!addingCustom ? (
+        <div className="rounded-lg border border-border-subtle p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <BookOpen size={13} className="text-accent shrink-0" />
+            <span className="text-xs font-semibold text-heading flex-1">{t("market.sourceCustomTitle")}</span>
+            {customCatalog && (
+              <span className="text-2xs text-emerald-600 dark:text-emerald-300">
+                <Check size={10} className="inline mr-0.5" />
+                {t("market.sourceConnected", { name: customCatalog.name })}
+              </span>
+            )}
+          </div>
+          <p className="text-2xs text-muted leading-relaxed">{t("market.customHint")}</p>
+          <input
+            value={manifestUrl}
+            onChange={(event) => onChangeUrl(event.target.value)}
+            placeholder={t("market.manifestPlaceholder")}
+            spellCheck={false}
+            className="input font-mono"
+            autoFocus
+          />
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => setAddingCustom(true)}
+              className="btn btn-primary btn-sm"
+              disabled={!manifestUrl.trim() || customSyncing}
+              onClick={onSync}
             >
-              {t("market.emptyCustomLink")}
+              {customSyncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              {customSyncing ? t("market.syncing") : t("market.sourceConnect")}
             </button>
-          ) : (
-            <div className="card p-3 text-left space-y-2">
-              <label className="text-2xs font-semibold text-faint">{t("market.emptyCustomUrlLabel")}</label>
-              <div className="flex items-center gap-2">
-                <input
-                  value={manifestUrl}
-                  onChange={(event) => setManifestUrl(event.target.value)}
-                  placeholder={t("market.manifestPlaceholder")}
-                  spellCheck={false}
-                  className="input flex-1 font-mono"
-                />
-                <button
-                  type="button"
-                  className="btn btn-outline btn-sm shrink-0"
-                  disabled={!manifestUrl.trim()}
-                  onClick={() => {
-                    onUseCustom(manifestUrl.trim());
-                    setAddingCustom(false);
-                  }}
-                >
-                  {t("market.emptyCustomApply")}
-                </button>
-              </div>
-              <p className="text-2xs text-faint leading-relaxed">{t("market.customHint")}</p>
-            </div>
-          )}
+            {customCatalog && (
+              <button type="button" className="btn btn-ghost btn-sm text-red-500 hover:text-red-600" onClick={onRemove}>
+                {t("market.sourceRemove")}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="connection-dialog-actions">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            {t("common.close")}
+          </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+type MarketplaceCatalogLike = { name: string };
+
+// ===================== 空态引导 =====================
+
+function EmptyMarket({ onAddSource }: { onAddSource: () => void }) {
+  const t = useT();
+  return (
+    <div className="h-full flex flex-col items-center justify-center text-center px-6">
+      <div className="w-12 h-12 rounded-2xl bg-accent-soft text-accent flex items-center justify-center">
+        <Store size={22} />
+      </div>
+      <h2 className="text-sm font-bold text-heading mt-3">{t("market.emptyTitle")}</h2>
+      <p className="text-xs text-muted mt-1 max-w-[380px] leading-relaxed">{t("market.emptyDesc")}</p>
+      <button type="button" className="btn btn-outline btn-sm mt-4" onClick={onAddSource}>
+        <Plus size={13} /> {t("market.emptyAddSource")}
+      </button>
+      <p className="text-2xs text-faint mt-4 max-w-[360px] leading-relaxed">{t("market.emptyPrivacy")}</p>
     </div>
   );
 }
@@ -472,336 +609,6 @@ function MarketCard({
         )}
       </div>
     </article>
-  );
-}
-
-// ===================== 技能安装弹窗 =====================
-
-function SkillInstallDialog({
-  entry,
-  libraries,
-  skills,
-  onClose,
-  onInstalled,
-}: {
-  entry: MarketplaceSkill | null;
-  libraries: LibrarySource[];
-  skills: Skill[];
-  onClose: () => void;
-  onInstalled: () => Promise<void>;
-}) {
-  const t = useT();
-  const [libraryId, setLibraryId] = useState("");
-  const [installing, setInstalling] = useState(false);
-  const [result, setResult] = useState<InstallResult | null>(null);
-  const [riskConfirmed, setRiskConfirmed] = useState(false);
-
-  useEffect(() => {
-    if (!entry) {
-      setResult(null);
-      setRiskConfirmed(false);
-      return;
-    }
-    setResult(null);
-    setRiskConfirmed(false);
-    if (libraries.length > 0) {
-      setLibraryId((current) => (current && libraries.some((library) => library.id === current) ? current : libraries[0].id));
-    }
-  }, [entry, libraries]);
-
-  if (!entry) return null;
-
-  const runInstall = async (overrideAudit: boolean) => {
-    if (installing || !libraryId) return;
-    setInstalling(true);
-    try {
-      const installResult = await installSkill(
-        {
-          kind: "git",
-          source_ref: entry.source.source_ref,
-          subdir: entry.source.subdir ?? null,
-        },
-        libraryId,
-        overrideAudit,
-      );
-      setResult(installResult);
-      if (installResult.status === "installed") {
-        await onInstalled();
-      }
-    } catch (error) {
-      toast().show(String(error), "error");
-    } finally {
-      setInstalling(false);
-    }
-  };
-
-  const status = result?.status;
-  const findings: AuditFinding[] = result?.report?.findings ?? [];
-  const needsRiskConfirm = status === "audit_warned";
-
-  return (
-    <div className="connection-dialog-overlay" onMouseDown={(event) => {
-      if (event.target === event.currentTarget && !installing) onClose();
-    }}>
-      <div role="dialog" aria-modal="true" className="install-dialog" data-testid="market-install-skill-dialog">
-        <div className="flex items-start gap-2.5 mb-3.5 pr-7">
-          <div className="connection-dialog-icon bg-accent-soft text-accent">
-            <BookOpen size={18} />
-          </div>
-          <div className="min-w-0">
-            <h3 className="connection-dialog-title">{t("market.dlgInstallTitle", { name: entry.name })}</h3>
-            <p className="connection-dialog-message truncate" title={entry.source.source_ref}>
-              {t("market.dlgFrom", { source: entry.source.source_ref, author: entry.author || "—" })}
-            </p>
-          </div>
-        </div>
-
-        {!result && (
-          <>
-            <StepLabel>
-              {installing ? t("market.dlgStep1Checking") : t("market.dlgStep1")}
-            </StepLabel>
-            <CheckPanel tone="pending" icon={<ShieldCheck size={16} className={installing ? "animate-pulse" : ""} />}>
-              <CheckPanelTitle tone="pending">{t("market.dlgCheckPendingTitle")}</CheckPanelTitle>
-              <p className="text-2xs text-muted leading-relaxed mt-0.5">{t("market.dlgCheckPendingDesc")}</p>
-            </CheckPanel>
-            <StepLabel>{t("market.dlgStep2")}</StepLabel>
-            <label className="block space-y-1 mb-1">
-              <span className="text-2xs font-semibold text-faint uppercase tracking-wider">{t("market.dlgLocation")}</span>
-              <select value={libraryId} onChange={(event) => setLibraryId(event.target.value)} className="input">
-                {libraries.map((library) => (
-                  <option key={library.id} value={library.id}>{library.name}</option>
-                ))}
-              </select>
-              <span className="block text-2xs text-faint leading-relaxed mt-1">{t("market.dlgLocationTip")}</span>
-            </label>
-            <div className="connection-dialog-actions">
-              <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={installing}>
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => runInstall(false)}
-                disabled={installing || !libraryId}
-              >
-                {installing ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-                {installing ? t("market.dlgInstalling") : t("market.dlgInstallBtn")}
-              </button>
-            </div>
-          </>
-        )}
-
-        {status === "installed" && result && (
-          <SuccessPanel
-            title={t("market.dlgSuccessTitle")}
-            desc={t("market.dlgSuccessDesc")}
-            primaryLabel={t("market.dlgGoConnect")}
-            secondaryLabel={t("market.dlgLater")}
-            onPrimary={() => {
-              goToSkill(result.skill_id);
-              onClose();
-            }}
-            onSecondary={onClose}
-          />
-        )}
-
-        {status === "conflict" && result && (
-          <SuccessPanel
-            title={t("market.dlgConflictTitle")}
-            desc={t("market.dlgConflictDesc")}
-            primaryLabel={t("market.enable")}
-            secondaryLabel={t("common.close")}
-            onPrimary={() => {
-              // 冲突结果不带 skill_id，按名称找本机已有技能
-              goToSkill(result.skill_id ?? findLocalSkill(skills, entry)?.id);
-              onClose();
-            }}
-            onSecondary={onClose}
-          />
-        )}
-
-        {status === "audit_blocked" && (
-          <>
-            <StepLabel>{t("market.dlgStep1Issues")}</StepLabel>
-            <CheckPanel tone="danger" icon={<TriangleAlert size={16} />}>
-              <CheckPanelTitle tone="danger">{t("market.dlgBlockedTitle")}</CheckPanelTitle>
-              <p className="text-2xs text-muted leading-relaxed mt-0.5">{t("market.dlgBlockedDesc")}</p>
-            </CheckPanel>
-            <RiskFindings findings={findings} />
-            <div className="connection-dialog-actions">
-              <button type="button" className="btn btn-outline btn-sm" onClick={onClose} autoFocus>
-                {t("market.dlgBack")}
-              </button>
-            </div>
-          </>
-        )}
-
-        {needsRiskConfirm && (
-          <>
-            <StepLabel>{t("market.dlgStep1Issues")}</StepLabel>
-            <CheckPanel tone="warn" icon={<TriangleAlert size={16} />}>
-              <CheckPanelTitle tone="warn">
-                {t("market.dlgCheckIssuesTitle", { count: findings.length })}
-              </CheckPanelTitle>
-              <p className="text-2xs text-muted leading-relaxed mt-0.5">{t("market.dlgCheckIssuesDesc")}</p>
-            </CheckPanel>
-            <RiskFindings findings={findings} />
-            <label className="flex items-start gap-2 mt-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={riskConfirmed}
-                onChange={(event) => setRiskConfirmed(event.target.checked)}
-                className="mt-0.5"
-              />
-              <span className="text-2xs text-muted leading-relaxed">{t("market.dlgRiskConfirm")}</span>
-            </label>
-            <div className="connection-dialog-actions" style={{ justifyContent: "space-between" }}>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={installing}>
-                {t("market.dlgBack")}
-              </button>
-              <button
-                type="button"
-                className="btn btn-danger btn-sm"
-                disabled={!riskConfirmed || installing}
-                onClick={() => runInstall(true)}
-              >
-                {installing ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-                {t("market.dlgInstallAnyway")}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function StepLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="text-2xs font-semibold text-faint uppercase tracking-wider mb-1.5">{children}</div>
-  );
-}
-
-type PanelTone = "ok" | "warn" | "danger" | "pending";
-
-const PANEL_TONE_CLASSES: Record<PanelTone, string> = {
-  ok: "bg-emerald-50 border-emerald-200 dark:bg-emerald-900/30 dark:border-emerald-800",
-  warn: "bg-amber-50 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800",
-  danger: "bg-red-50 border-red-200 dark:bg-red-900/30 dark:border-red-800",
-  pending: "bg-surface-2 border-border-subtle",
-};
-
-const PANEL_TITLE_CLASSES: Record<PanelTone, string> = {
-  ok: "text-emerald-600 dark:text-emerald-300",
-  warn: "text-amber-600 dark:text-amber-300",
-  danger: "text-red-600 dark:text-red-300",
-  pending: "text-muted",
-};
-
-function CheckPanel({
-  tone,
-  icon,
-  children,
-}: {
-  tone: PanelTone;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className={"rounded-lg border p-3 flex gap-2.5 mb-3 " + PANEL_TONE_CLASSES[tone]}>
-      <span className={"shrink-0 mt-0.5 " + PANEL_TITLE_CLASSES[tone]}>{icon}</span>
-      <div className="min-w-0">{children}</div>
-    </div>
-  );
-}
-
-function CheckPanelTitle({ tone, children }: { tone: PanelTone; children: React.ReactNode }) {
-  return (
-    <div className={"text-xs font-semibold " + PANEL_TITLE_CLASSES[tone]}>{children}</div>
-  );
-}
-
-/** 风险条目：相同检查项合并展示，白话标题 + 「这是什么意思？」展开（规则编号与位置收进展开层） */
-function RiskFindings({ findings }: { findings: AuditFinding[] }) {
-  const t = useT();
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const merged = mergeFindings(findings);
-  return (
-    <div className="space-y-2">
-      {merged.map((finding, index) => {
-        const key = `${finding.rule_id}-${index}`;
-        const explanation = ruleExplanation(finding.rule_id);
-        const open = expanded[key];
-        return (
-          <div key={key} className="rounded-lg border border-border-subtle bg-surface p-2.5">
-            <div className="flex items-start gap-2">
-              <TriangleAlert size={13} className="text-amber-500 shrink-0 mt-0.5" />
-              <span className="text-xs text-content leading-relaxed flex-1">{finding.message}</span>
-              {finding.count > 1 && (
-                <span className="text-2xs text-faint shrink-0 mt-0.5">
-                  {t("market.dlgFindingCount", { count: finding.count })}
-                </span>
-              )}
-            </div>
-            {(explanation || finding.locations.length > 0) && (
-              <button
-                type="button"
-                className="flex items-center gap-1 text-2xs text-accent mt-1.5 ml-5"
-                onClick={() => setExpanded((current) => ({ ...current, [key]: !current[key] }))}
-              >
-                {t("market.dlgWhatMean")}
-                {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-              </button>
-            )}
-            {open && (
-              <div className="ml-5 mt-1.5 rounded bg-surface-2 p-2 text-2xs text-muted leading-relaxed">
-                {explanation}
-                <div className="text-faint font-mono mt-1 space-y-0.5">
-                  <div>{t("market.dlgRuleRef", { id: finding.rule_id })}</div>
-                  {finding.locations.map((location) => (
-                    <div key={location} className="truncate" title={location}>{location}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function SuccessPanel({
-  title,
-  desc,
-  primaryLabel,
-  secondaryLabel,
-  onPrimary,
-  onSecondary,
-}: {
-  title: string;
-  desc: string;
-  primaryLabel: string;
-  secondaryLabel: string;
-  onPrimary: () => void;
-  onSecondary: () => void;
-}) {
-  return (
-    <>
-      <CheckPanel tone="ok" icon={<Check size={16} />}>
-        <CheckPanelTitle tone="ok">{title}</CheckPanelTitle>
-        <p className="text-2xs text-muted leading-relaxed mt-0.5">{desc}</p>
-      </CheckPanel>
-      <div className="connection-dialog-actions">
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onSecondary}>
-          {secondaryLabel}
-        </button>
-        <button type="button" className="btn btn-primary btn-sm" onClick={onPrimary}>
-          {primaryLabel} <ArrowRight size={12} />
-        </button>
-      </div>
-    </>
   );
 }
 

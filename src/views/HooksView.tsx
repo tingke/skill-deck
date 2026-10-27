@@ -13,6 +13,7 @@ import { Webhook, Plus, X } from "lucide-react";
 import type { ExtensionRow, HookInput, HookObserverStatus } from "../types";
 import { HOOK_EVENTS } from "../types";
 import { ExtRow, ExtCard, ToggleSwitch } from "../components/ExtList";
+import { useViewMode } from "../lib/useViewMode";
 import ViewToggle from "../components/ViewToggle";
 import PageHeader, { ContentTitle } from "../components/PageHeader";
 import SearchInput from "../components/SearchInput";
@@ -39,7 +40,7 @@ export default function HooksView() {
   const extIds = extensions.map((e) => e.id).join(",");
   const [editing, setEditing] = useState<ExtensionRow | null>(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+  const [viewMode, setViewMode] = useViewMode("hooks");
   const [query, setQuery] = useState("");
   const visibleHooks = useMemo(() => {
     const q = query.trim().toLowerCase();

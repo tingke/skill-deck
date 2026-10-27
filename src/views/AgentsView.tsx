@@ -17,6 +17,7 @@ import {
   ToggleRight,
   ChevronRight,
 } from "lucide-react";
+import { useViewMode } from "../lib/useViewMode";
 import ViewToggle from "../components/ViewToggle";
 import SearchInput from "../components/SearchInput";
 import { ContentTitle } from "../components/PageHeader";
@@ -52,7 +53,7 @@ export default function AgentsView() {
   const [editing, setEditing] = useState<AgentRow | null>(null);
   const [creating, setCreating] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useViewMode("agents");
   const [query, setQuery] = useState("");
   const deleteConfirmation = useDeleteConfirmation();
   const detailAgent = detailId ? agents.find((a) => a.id === detailId) ?? null : null;

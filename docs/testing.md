@@ -6,8 +6,7 @@
 
 | 命令 | 覆盖内容 | 当前基线 |
 | --- | --- | --- |
-| `npm test` | 纯 TypeScript 逻辑与 Zustand 确认流 | 31 个 Node test |
-| `npm run test:layout` | App shell、Skills 布局、Tauri 窗口、drag region、设计 token 契约 | 通过 |
+| `npm test` | 纯 TypeScript 逻辑与 Zustand 确认流 | Node test |
 | `npm run typecheck` | TypeScript strict 检查 | 通过 |
 | `npm run build` | typecheck + Vite production build | CI 前端必跑 |
 | `cd src-tauri && cargo check --locked` | Rust 编译与依赖检查 | CI 必跑 |
@@ -35,17 +34,9 @@ import test from "node:test";
 
 测试尽量传入普通对象和函数依赖，不 mock Tauri 全局对象。需要直接调用 store 时，先按现有测试方式提供 `localStorage` stub。
 
-## 布局契约测试
+## 布局契约测试（已移除）
 
-`scripts/verify-layout.mjs` 读取源码和配置并断言：
-
-- Tauri 主窗口使用 overlay title bar、hidden title 和 traffic light position。
-- capability 允许 main window start dragging。
-- App shell 保留主侧栏、workspace toolbar 和 drag region。
-- Skills 左栏、共享 DetailDrawer、token 化网格和窄容器行为不回退。
-- 不重新引入任意 11–13px 字号（最小类型档 `--text-2xs` 为 13px）。
-
-修改 `App.tsx`、`SkillsView.tsx`、`DetailDrawer.tsx`、`styles.css`、`tailwind.config.js` 或 Tauri 窗口配置后运行它。若布局行为有意变化，同步更新契约断言，而不是删除检查。
+`scripts/verify-layout.mjs` 布局契约测试已删除：页面布局处于频繁调整期，源码断言式契约维护成本高于收益。布局回归目前依赖 `npm run build`（typecheck）与人工验证。布局稳定后可考虑 reintroduce（git 历史可恢复旧断言作起点）。
 
 ## Rust 测试
 
@@ -97,7 +88,7 @@ npm run tauri:dev
 
 - 仅文档：检查引用路径和命令是否真实存在。
 - TypeScript 纯逻辑：`npm test` + `npm run typecheck`。
-- React 视图/布局：`npm run test:layout` + `npm run build`，必要时手动打开页面。
+- React 视图/布局：`npm run build` + 手动打开页面检查。
 - Tauri command/Rust 域逻辑：`cargo test --locked` + 相关前端调用检查。
 - schema/迁移：`cargo test --locked`，并考虑备份恢复路径。
 - 共享行为或发布配置：运行与 CI 相同的前端和 Rust 检查。

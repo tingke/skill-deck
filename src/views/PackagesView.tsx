@@ -54,6 +54,7 @@ import DetailDrawer from "../components/DetailDrawer";
 import { AgentGlyph } from "../components/AgentGlyph";
 import PageHeader, { ContentTitle } from "../components/PageHeader";
 import SearchInput from "../components/SearchInput";
+import { useViewMode } from "../lib/useViewMode";
 import ViewToggle from "../components/ViewToggle";
 
 const toast = () => useToastStore.getState();
@@ -65,7 +66,7 @@ export default function PackagesView() {
   const rules = useAssetsStore((s) => s.rules);
   const extensions = useExtensionsStore((s) => s.extensions);
   const [query, setQuery] = useState("");
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useViewMode("packages");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);

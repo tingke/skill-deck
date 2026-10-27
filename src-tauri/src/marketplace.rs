@@ -1,12 +1,17 @@
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::net::{IpAddr, ToSocketAddrs};
 use std::time::Duration;
 
 pub const DEFAULT_MCP_REGISTRY_URL: &str = "https://registry.modelcontextprotocol.io/v0.1/servers";
+/// 官方 Skill 源：Anthropic 官方技能仓库，安装时走 git 来源按子目录拉取。
+pub const DEFAULT_SKILL_SOURCE_URL: &str = "https://github.com/anthropics/skills";
 const MAX_MANIFEST_BYTES: usize = 5 * 1024 * 1024;
 const MAX_REGISTRY_PAGE_BYTES: usize = 2 * 1024 * 1024;
+/// 官方 Skill 仓库 tarball 上限（解压前）
+const MAX_TARBALL_BYTES: usize = 20 * 1024 * 1024;
 const MAX_MARKET_ITEMS: usize = 500;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -604,6 +609,132 @@ fn placeholder(name: &str) -> String {
     format!("{{{{config.{}}}}}", name)
 }
 
+/// 解析 SKILL.md YAML frontmatter 的 name / description（不做完整 YAML 解析，
+/// 只取顶层标量字段，避免引入新依赖）。
+fn parse_skill_frontmatter(text: &str) -> Option<(String, String)> {
+    let rest = text.strip_prefix("---")?;
+    let end = rest.find("\n---")?;
+    let block = &rest[..end];
+    let mut name = None;
+    let mut description = None;
+    for line in block.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        // 只接受顶层键：缩进行属于嵌套结构，跳过
+        if key.is_empty() || line.starts_with(' ') || line.starts_with('\t') {
+            continue;
+        }
+        let mut value = value.trim();
+        // 去掉成对引号
+        if (value.starts_with('"') && value.ends_with('"') && value.len() >= 2)
+            || (value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2)
+        {
+            value = &value[1..value.len() - 1];
+        }
+        match key {
+            "name" => name = Some(value.to_string()),
+            "description" => description = Some(value.to_string()),
+            _ => {}
+        }
+    }
+    Some((name?, description?))
+}
+
+/// 官方 Skill 源：GitHub 仓库（如 anthropics/skills）。
+/// 拉取仓库 tarball（codeload，无 API 速率限制），在内存中解包找每个 SKILL.md，
+/// frontmatter 的 name/description 作为条目信息，安装来源 = 仓库 + SKILL.md 所在子目录。
+async fn sync_github_skills(
+    client: &Client,
+    repo_url: Url,
+    max_items: usize,
+) -> Result<MarketplaceCatalog, String> {
+    if repo_url.host_str() != Some("github.com") {
+        return Err("官方 Skill 源目前仅支持 github.com 仓库".to_string());
+    }
+    let path = repo_url.path().trim_matches('/');
+    let (owner, repo) = path
+        .split_once('/')
+        .filter(|(owner, repo)| !owner.is_empty() && !repo.is_empty() && !repo.contains('/'))
+        .ok_or_else(|| "官方 Skill 源 URL 应为 https://github.com/<owner>/<repo>".to_string())?;
+
+    // codeload tarball 不占用 GitHub API 速率限制；HEAD 跟随默认分支
+    let tarball_url = Url::parse(&format!("https://codeload.github.com/{}/{}/tar.gz/HEAD", owner, repo))
+        .map_err(|e| format!("无效 tarball URL: {}", e))?;
+    let raw = fetch_bytes(client, &tarball_url, MAX_TARBALL_BYTES).await?;
+    let skills = extract_skills_from_tarball(&raw, owner, repo, max_items)?;
+    if skills.is_empty() {
+        return Err("官方 Skill 源没有找到可安装的技能（需要每个技能目录含 SKILL.md）".to_string());
+    }
+
+    Ok(MarketplaceCatalog {
+        source_kind: "github-skills".to_string(),
+        source_url: repo_url.to_string(),
+        name: format!("{}/{}", owner, repo),
+        synced_at: now_iso(),
+        skills,
+        mcps: Vec::new(),
+    })
+}
+
+/// 内存解包 tar.gz：遍历条目，遇到 `<root>/<...>/SKILL.md` 就解析 frontmatter。
+fn extract_skills_from_tarball(
+    gz: &[u8],
+    owner: &str,
+    repo: &str,
+    max_items: usize,
+) -> Result<Vec<MarketplaceSkill>, String> {
+    let decoder = flate2::read::GzDecoder::new(gz);
+    let mut archive = tar::Archive::new(decoder);
+    let mut skills = Vec::new();
+    let mut seen_dirs = HashSet::new();
+    let entries = archive
+        .entries()
+        .map_err(|e| format!("仓库 tarball 解包失败: {}", e))?;
+    for entry in entries {
+        let Ok(mut entry) = entry else { continue };
+        // tarball 内部路径形如 <repo>-<branch>/skills/docx/SKILL.md，去掉第一段根目录
+        let Ok(path) = entry.path() else { continue };
+        let path = path.to_path_buf();
+        let mut components = path.components();
+        components.next(); // 丢弃根目录段
+        let rel: std::path::PathBuf = components.collect();
+        let Some((dir, file)) = rel.to_str().and_then(|text| text.rsplit_once('/')) else {
+            continue;
+        };
+        if file != "SKILL.md" || dir.is_empty() || !seen_dirs.insert(dir.to_string()) {
+            continue;
+        }
+        if skills.len() >= max_items {
+            break;
+        }
+        let mut bytes = Vec::new();
+        if entry.read_to_end(&mut bytes).is_err() {
+            continue; // 读取失败：跳过该条目
+        }
+        let text = String::from_utf8_lossy(&bytes).to_string();
+        let Some((name, description)) = parse_skill_frontmatter(&text) else {
+            continue;
+        };
+        let repo_https = format!("https://github.com/{}/{}", owner, repo);
+        skills.push(MarketplaceSkill {
+            id: format!("{}/{}", owner, dir.replace('/', "-")),
+            name,
+            description,
+            author: owner.to_string(),
+            tags: vec!["official".to_string(), "anthropic".to_string()],
+            homepage: validate_https_homepage(&repo_https).ok().map(|_| repo_https.clone()),
+            source: MarketplaceSkillSource {
+                kind: "git".to_string(),
+                source_ref: repo_https,
+                subdir: Some(dir.to_string()),
+            },
+        });
+    }
+    Ok(skills)
+}
+
 fn registry_input(
     name: &str,
     description: Option<&str>,
@@ -990,8 +1121,24 @@ pub async fn sync_marketplace_impl(
     if is_mcp_registry(&url) {
         return sync_registry(&client, url, max_items).await;
     }
+    if is_github_skill_repo(&url) {
+        return sync_github_skills(&client, url, max_items).await;
+    }
     let raw = fetch_bytes(&client, &url, MAX_MANIFEST_BYTES).await?;
     parse_manifest(&raw, url.as_str())
+}
+
+/// 官方 Skill 源识别：github.com/<owner>/<repo> 顶层仓库地址（不含更深路径）。
+/// 团队 GitHub manifest 通常是具体 JSON 文件（带 .json 扩展名或更深路径），不受影响。
+fn is_github_skill_repo(url: &Url) -> bool {
+    if url.host_str() != Some("github.com") {
+        return false;
+    }
+    if url.path().ends_with(".json") {
+        return false;
+    }
+    let segments: Vec<&str> = url.path().trim_matches('/').split('/').collect();
+    segments.len() == 2 && segments.iter().all(|segment| !segment.is_empty())
 }
 
 #[tauri::command(async)]
@@ -1089,6 +1236,55 @@ mod tests {
                 url
             );
         }
+    }
+
+    #[test]
+    fn github_skill_repo_detection_matches_top_level_repos_only() {
+        let parse = |raw: &str| Url::parse(raw).unwrap();
+        assert!(is_github_skill_repo(&parse("https://github.com/anthropics/skills")));
+        assert!(is_github_skill_repo(&parse("https://github.com/anthropics/skills/")));
+        // manifest JSON 文件与更深路径不走技能仓库解析
+        assert!(!is_github_skill_repo(&parse(
+            "https://github.com/anthropics/skills/blob/main/market.json"
+        )));
+        assert!(!is_github_skill_repo(&parse(
+            "https://github.com/anthropics/skills/tree/main/skills"
+        )));
+        assert!(!is_github_skill_repo(&parse("https://example.com/anthropics/skills")));
+        assert!(!is_github_skill_repo(&parse("https://github.com/anthropics")));
+    }
+
+    #[test]
+    fn skill_frontmatter_parses_name_and_description() {
+        let doc = "---\nname: docx\ndescription: \"Create Word docs\"\nlicense: MIT\n---\n\n# Body\n";
+        let (name, description) = parse_skill_frontmatter(doc).unwrap();
+        assert_eq!(name, "docx");
+        assert_eq!(description, "Create Word docs");
+
+        // 单引号与缩进行（嵌套字段）处理
+        let doc2 = "---\nname: 'my-skill'\nmetadata:\n  nested: true\ndescription: plain\n---\n";
+        let (name2, description2) = parse_skill_frontmatter(doc2).unwrap();
+        assert_eq!(name2, "my-skill");
+        assert_eq!(description2, "plain");
+
+        // 缺字段或无 frontmatter 时拒绝
+        assert!(parse_skill_frontmatter("# no frontmatter").is_none());
+        assert!(parse_skill_frontmatter("---\nname: only\n---\n").is_none());
+    }
+
+    #[test]
+    fn sync_github_skills_fetches_anthropic_official_repo() {
+        // 真实网络集成测试：anthropics/skills 是官方默认技能源
+        let url = Url::parse(DEFAULT_SKILL_SOURCE_URL).unwrap();
+        let client = http_client().unwrap();
+        let catalog = tauri::async_runtime::block_on(sync_github_skills(&client, url, 500)).unwrap();
+        assert_eq!(catalog.source_kind, "github-skills");
+        assert!(catalog.skills.len() >= 5, "expected official skills, got {}", catalog.skills.len());
+        let docx = catalog.skills.iter().find(|skill| skill.name == "docx");
+        let docx = docx.expect("docx skill should exist in anthropics/skills");
+        assert!(!docx.description.is_empty());
+        assert_eq!(docx.source.source_ref, "https://github.com/anthropics/skills");
+        assert_eq!(docx.source.subdir.as_deref(), Some("skills/docx"));
     }
 
     #[test]

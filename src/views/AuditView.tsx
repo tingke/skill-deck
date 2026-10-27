@@ -322,11 +322,14 @@ export default function AuditView() {
                 <div
                   key={skill.id}
                   onClick={() => openReport(skill.id)}
-                  className="px-4 py-2.5 flex items-center gap-3.5 cursor-pointer border-b border-border-subtle last:border-b-0 transition-colors hover:bg-surface-hover"
+                  className={
+                    "list-row list-row--audit" +
+                    (isDanger ? " list-row--danger" : isWarn ? " list-row--warn" : "")
+                  }
                 >
                   <span
                     className={
-                      "text-sm font-semibold shrink-0 max-w-[180px] truncate " +
+                      "list-row__name " +
                       (isDanger
                         ? "text-red-600 dark:text-red-300"
                         : isWarn
@@ -338,12 +341,13 @@ export default function AuditView() {
                   >
                     {skill.name}
                   </span>
-                  <span className="text-2xs text-muted truncate min-w-0 flex-1">
+                  <span className="list-row__desc">
                     {summaryLine}
                     {checkedAt
                       ? " · " + t("safety.rowCheckedAt", { lib: skill.source_lib, time: checkedAt })
                       : " · " + t("safety.rowSource", { lib: skill.source_lib })}
                   </span>
+                  <span className="list-row__tags" />
                   <div className="flex items-center gap-2 shrink-0" onClick={(event) => event.stopPropagation()}>
                     {isDanger && (
                       <button type="button" className="btn btn-ghost btn-sm text-red-500 hover:text-red-600" onClick={() => openReport(skill.id)}>
@@ -360,8 +364,8 @@ export default function AuditView() {
                         <RefreshCw size={12} /> {t("safety.rowCheck")}
                       </button>
                     )}
-                    <ChevronRight size={14} className="list-row__chev" />
                   </div>
+                  <ChevronRight size={14} className="list-row__chev" />
                 </div>
               );
             })}

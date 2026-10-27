@@ -263,6 +263,21 @@ pub fn scan_all(db: State<DbState>, log: Option<bool>) -> Result<Vec<SkillRow>, 
         }
     }
 
+    // 扫描所有启用 Agent 的全局 skills 目录（如 ~/.claude/skills、~/.workbuddy/skills）。
+    // scan_runtime_dir 会跳过 symlink（连接软链不算独立 skill）。
+    for agent in db_enabled_agents(&conn) {
+        let dir = runtime_skills_dir(&agent.id, &conn);
+        if !dir.is_dir() {
+            continue;
+        }
+        found_ids.extend(scanner::scan_runtime_dir(
+            &conn,
+            &agent.id,
+            &agent.label,
+            &dir.to_string_lossy(),
+        ));
+    }
+
     // 把备份的 tags 按 path 还原到新扫描出的 skill 行（应对 id 前缀变化的场景）
     if !path_tags.is_empty() {
         let mut stmt = conn
@@ -419,45 +434,6 @@ pub fn batch_connect(
     Ok(())
 }
 
-/// 读取 SKILL.md 内容
-#[tauri::command(async)]
-pub fn read_skill_file(db: State<DbState>, skill_id: String) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let path: String = conn
-        .query_row(
-            "SELECT path FROM skills WHERE id = ?1",
-            params![skill_id],
-            |row| row.get(0),
-        )
-        .map_err(|_| "skill not found".to_string())?;
-
-    let skill_md = skill_connections::active_manifest_path(Path::new(&path))
-        .ok_or_else(|| "skill manifest not found".to_string())?;
-    fs::read_to_string(&skill_md).map_err(|e| format!("读取失败: {}", e))
-}
-
-/// 写入 SKILL.md 内容
-#[tauri::command(async)]
-pub fn write_skill_file(
-    db: State<DbState>,
-    skill_id: String,
-    content: String,
-) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let path: String = conn
-        .query_row(
-            "SELECT path FROM skills WHERE id = ?1",
-            params![skill_id],
-            |row| row.get(0),
-        )
-        .map_err(|_| "skill not found".to_string())?;
-
-    let skill_md = skill_connections::active_manifest_path(Path::new(&path))
-        .ok_or_else(|| "skill manifest not found".to_string())?;
-    fs::write(&skill_md, &content).map_err(|e| format!("写入失败: {}", e))?;
-    Ok(())
-}
-
 /// 获取最近活动日志
 #[tauri::command]
 pub fn get_recent_activity(db: State<DbState>) -> Result<Vec<ActivityLog>, String> {
@@ -532,6 +508,63 @@ pub fn delete_skill(db: State<DbState>, skill_id: String) -> Result<(), String> 
     Ok(())
 }
 
+/// 批量删除 skill：复用 delete_skill 单个逻辑，返回失败的 skill_id 列表。
+#[tauri::command(async)]
+pub fn batch_delete_skills(
+    db: State<DbState>,
+    skill_ids: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut failed = Vec::new();
+    for skill_id in &skill_ids {
+        let result = (|| -> Result<(), String> {
+            let path: String = conn
+                .query_row(
+                    "SELECT path FROM skills WHERE id = ?1",
+                    params![skill_id],
+                    |row| row.get(0),
+                )
+                .map_err(|_| "skill not found".to_string())?;
+            let name: String = conn
+                .query_row(
+                    "SELECT name FROM skills WHERE id = ?1",
+                    params![skill_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|_| skill_id.clone());
+
+            for rt in db_enabled_agents(&conn) {
+                let dir = runtime_skills_dir(&rt.id, &conn);
+                let dir_name = std::path::Path::new(&path)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let sym = dir.join(&dir_name);
+                if sym.is_symlink() {
+                    fs::remove_file(&sym).ok();
+                }
+            }
+
+            fs::remove_dir_all(&path).map_err(|e| format!("删除目录失败: {}", e))?;
+
+            conn.execute(
+                "DELETE FROM connections WHERE skill_id = ?1",
+                params![skill_id],
+            )
+            .ok();
+            conn.execute("DELETE FROM skills WHERE id = ?1", params![skill_id])
+                .ok();
+            log_activity(&conn, "delete", &name);
+            Ok(())
+        })();
+        if result.is_err() {
+            failed.push(skill_id.clone());
+        }
+    }
+    Ok(failed)
+}
+
 /// 更新 skill 标签
 #[tauri::command]
 pub fn update_skill_tags(
@@ -573,6 +606,36 @@ pub fn toggle_skill_enabled(
     enabled: bool,
 ) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    toggle_skill_enabled_impl(&conn, &skill_id, enabled)
+}
+
+/// 批量切换 skill 启用/停用：单条命令避免前端逐个 IPC 往返。
+/// 返回失败的 skill_id 列表（不存在的 id 或 manifest 重命名冲突）。
+#[tauri::command]
+pub fn batch_toggle_skill_enabled(
+    db: State<DbState>,
+    skill_ids: Vec<String>,
+    enabled: bool,
+) -> Result<Vec<String>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    batch_toggle_skill_enabled_impl(&conn, &skill_ids, enabled)
+}
+
+fn batch_toggle_skill_enabled_impl(
+    conn: &rusqlite::Connection,
+    skill_ids: &[String],
+    enabled: bool,
+) -> Result<Vec<String>, String> {
+    let mut failed = Vec::new();
+    for skill_id in skill_ids {
+        if toggle_skill_enabled_impl(conn, skill_id, enabled).is_err() {
+            failed.push(skill_id.clone());
+        }
+    }
+    Ok(failed)
+}
+
+fn toggle_skill_enabled_impl(conn: &rusqlite::Connection, skill_id: &str, enabled: bool) -> Result<(), String> {
     let path: String = conn
         .query_row(
             "SELECT path FROM skills WHERE id = ?1",
@@ -589,7 +652,7 @@ pub fn toggle_skill_enabled(
             params![skill_id],
             |row| row.get(0),
         )
-        .unwrap_or_else(|_| skill_id.clone());
+        .unwrap_or_else(|_| skill_id.to_string());
     conn.execute(
         "UPDATE skills SET enabled = ?1, updated_at = ?2 WHERE id = ?3",
         params![enabled as i32, now_iso(), skill_id],
@@ -597,7 +660,7 @@ pub fn toggle_skill_enabled(
     .map_err(|e| e.to_string())?;
     let flag = if enabled { 1 } else { 0 };
     log_activity(
-        &conn,
+        conn,
         "toggle_skill",
         &format!(
             "{} skill: {}",
@@ -1328,5 +1391,70 @@ mod tests {
 
         validate_library_path(&conn, "lib", &lib.0.to_string_lossy())
             .expect("disjoint dirs should not conflict");
+    }
+
+    fn add_skill_row(conn: &rusqlite::Connection, id: &str, path: &Path) {
+        conn.execute(
+            "INSERT INTO skills (id, name, source_lib, path, created_at, updated_at)
+             VALUES (?1, ?1, 'lib', ?2, 'now', 'now')",
+            params![id, path.to_string_lossy().to_string()],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn batch_toggle_reports_missing_ids_and_applies_rest() {
+        let dir = TempDir::new("batch-toggle");
+        let a = dir.0.join("a");
+        let b = dir.0.join("b");
+        for skill_dir in [&a, &b] {
+            std::fs::create_dir_all(skill_dir).unwrap();
+            std::fs::write(skill_dir.join("SKILL.md"), "---\nname: x\n---\nbody\n").unwrap();
+        }
+        let conn = open_in_memory();
+        add_skill_row(&conn, "a", &a);
+        add_skill_row(&conn, "b", &b);
+
+        let failed = batch_toggle_skill_enabled_impl(
+            &conn,
+            &["a".into(), "b".into(), "missing".into()],
+            false,
+        )
+        .unwrap();
+        assert_eq!(failed, vec!["missing".to_string()]);
+
+        let enabled: Vec<(String, i32)> = {
+            let mut stmt = conn
+                .prepare("SELECT id, enabled FROM skills ORDER BY id")
+                .unwrap();
+            let rows = stmt
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?)))
+                .unwrap();
+            rows.map(|r| r.unwrap()).collect()
+        };
+        assert_eq!(enabled, vec![("a".to_string(), 0), ("b".to_string(), 0)]);
+        assert!(b.join("SKILL.md.disabled").is_file());
+        assert!(!a.join("SKILL.md").is_file());
+    }
+
+    #[test]
+    fn batch_toggle_conflicting_manifest_fails_that_skill_only() {
+        let dir = TempDir::new("batch-toggle-conflict");
+        let bad = dir.0.join("bad");
+        let good = dir.0.join("good");
+        std::fs::create_dir_all(&bad).unwrap();
+        std::fs::create_dir_all(&good).unwrap();
+        // bad 同时存在两个 manifest，rename_skill_manifest 应报错
+        std::fs::write(bad.join("SKILL.md"), "x").unwrap();
+        std::fs::write(bad.join("SKILL.md.disabled"), "x").unwrap();
+        std::fs::write(good.join("SKILL.md.disabled"), "x").unwrap();
+        let conn = open_in_memory();
+        add_skill_row(&conn, "bad", &bad);
+        add_skill_row(&conn, "good", &good);
+
+        let failed = batch_toggle_skill_enabled_impl(&conn, &["bad".into(), "good".into()], true)
+            .unwrap();
+        assert_eq!(failed, vec!["bad".to_string()]);
+        assert!(good.join("SKILL.md").is_file());
     }
 }

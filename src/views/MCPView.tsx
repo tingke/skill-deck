@@ -10,6 +10,7 @@ import {
 import { Server, Search, Plus, X } from "lucide-react";
 import type { ExtensionRow, McpServerInput, AgentInfo } from "../types";
 import { ExtRow, ExtCard } from "../components/ExtList";
+import { useViewMode } from "../lib/useViewMode";
 import ViewToggle from "../components/ViewToggle";
 import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
@@ -28,7 +29,7 @@ export default function MCPView() {
     [allExtensions],
   );
   const [query, setQuery] = useState("");
-  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+  const [viewMode, setViewMode] = useViewMode("mcp");
   const visible = useMemo(
     () => extensions.filter((e) => e.name.toLowerCase().includes(query.trim().toLowerCase())),
     [extensions, query],

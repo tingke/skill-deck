@@ -778,8 +778,24 @@ code, pre, kbd { font-family: var(--font-mono); }
 .list-row--selected { background: rgb(var(--c-accent-soft)); }
 .dark .list-row--selected { background: rgb(var(--c-accent-soft) / 0.4); }
 
-/* Skills variant: name | desc | agent dots | audit | chevron */
+/* Skills variant: name | desc | tags | agent dots | audit | chevron */
 .list-row--skill {
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr) auto auto auto 14px;
+  cursor: pointer;
+}
+
+.list-row__tags {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  overflow: hidden;
+  justify-self: start;
+  max-width: 160px;
+}
+
+/* Audit variant: name | summary | (tags spacer) | actions | chevron —
+   keeps columns aligned with .list-row--skill */
+.list-row--audit {
   grid-template-columns: minmax(150px, 220px) minmax(0, 1fr) auto auto 14px;
   cursor: pointer;
 }
@@ -843,6 +859,28 @@ code, pre, kbd { font-family: var(--font-mono); }
   -webkit-backdrop-filter: blur(var(--mat-glass-blur)) saturate(var(--mat-glass-saturate));
   box-shadow: var(--mat-glass-highlight), var(--mat-glass-shadow);
   z-index: var(--z-sticky);
+}
+
+/* Floating batch action bar — same glass pill language as .skills-toolbar,
+   anchored above the list like the detail drawer's bottom tab capsule */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--height-page-bar);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--mat-glass-border);
+  border-radius: 999px;
+  background: var(--mat-glass-bg);
+  backdrop-filter: blur(var(--mat-glass-blur)) saturate(var(--mat-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--mat-glass-blur)) saturate(var(--mat-glass-saturate));
+  box-shadow: var(--mat-glass-highlight), var(--mat-glass-shadow);
+  z-index: var(--z-sticky);
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 
 .skills-search {
@@ -1126,6 +1164,13 @@ code, pre, kbd { font-family: var(--font-mono); }
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* fill variant: body becomes a flex column; children own their scrolling */
+.detail-drawer-body--fill {
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden;
 }
 
 /* (V1) drawer footer removed — action buttons live in the header (V1 图2/图3) */

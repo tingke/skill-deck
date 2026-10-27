@@ -24,7 +24,7 @@ import ToastContainer from "./components/Toast";
 import AgentActivityNotifier from "./components/AgentActivityNotifier";
 import ConnectionConfirmationDialog from "./components/ConnectionConfirmationDialog";
 import SkillDeleteDialog from "./components/SkillDeleteDialog";
-import { LayoutDashboard, FileText, Settings as SettingsIcon, BookOpen, Plug, Layers, Webhook, Server, Sun, Moon, FolderKanban, PanelLeftClose, PanelLeftOpen, ShieldCheck, Store } from "lucide-react";
+import { LayoutDashboard, FileText, ScrollText, Settings as SettingsIcon, BookOpen, Plug, Layers, Webhook, Server, Sun, Moon, FolderKanban, PanelLeftClose, PanelLeftOpen, ShieldCheck } from "lucide-react";
 import { Cpu } from "lucide-react";
 import logoUrl from "./assets/logo.png";
 import type { ViewKey } from "./types";
@@ -232,7 +232,7 @@ const navGroups: { label?: string; items: { key: ViewKey; label: string; icon: R
     items: [
       { key: "skills", label: t("nav.skills"), icon: <BookOpen size={17} />, badge: skills.length },
       { key: "prompts", label: t("nav.prompts"), icon: <FileText size={17} />, badge: prompts.length },
-      { key: "rules", label: t("nav.rules"), icon: <FileText size={17} />, badge: rules.length },
+      { key: "rules", label: t("nav.rules"), icon: <ScrollText size={17} />, badge: rules.length },
     ],
   },
   {
@@ -254,7 +254,7 @@ const navGroups: { label?: string; items: { key: ViewKey; label: string; icon: R
   {
     label: t("nav.groupDiscover"),
     items: [
-      { key: "market", label: t("nav.market"), icon: <Store size={17} /> },
+      // 商店入口暂时隐藏：技能获取以「技能页 → 自定义安装」为主，MarketView 代码保留可随时恢复
       { key: "audit", label: t("nav.audit"), icon: <ShieldCheck size={17} />, badge: unaudited || undefined, badgeTitle: t("nav.auditBadgeTitle", { count: unaudited }) },
     ],
   },

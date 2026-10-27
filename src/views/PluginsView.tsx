@@ -4,6 +4,7 @@ import { togglePlugin, deleteExt, extConfigPath } from "../lib/tauri";
 import { Package as PackageIcon, Search } from "lucide-react";
 import type { ExtensionRow } from "../types";
 import { ExtRow, ExtCard } from "../components/ExtList";
+import { useViewMode } from "../lib/useViewMode";
 import ViewToggle from "../components/ViewToggle";
 import { EmptyState } from "./MCPView";
 import { useToastStore } from "../stores/toast";
@@ -22,7 +23,7 @@ export default function PluginsView() {
     [allExtensions],
   );
   const [query, setQuery] = useState("");
-  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+  const [viewMode, setViewMode] = useViewMode("plugins");
   const visible = useMemo(
     () => extensions.filter((e) => e.name.toLowerCase().includes(query.trim().toLowerCase())),
     [extensions, query],
