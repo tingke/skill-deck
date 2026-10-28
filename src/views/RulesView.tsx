@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAssetsStore } from "../stores/assets";
+import { useUiStore } from "../stores/ui";
 import { useActivityStore } from "../stores/activity";
 import { saveRule, deleteRule, applyRule } from "../lib/tauri";
 import { Plus, Trash2, X, Search, ScrollText, Copy, Check, FileOutput, Edit3, ChevronRight } from "lucide-react";
@@ -24,7 +25,17 @@ export default function RulesView() {
   const [viewMode, setViewMode] = useViewMode("rules");
   const [editing, setEditing] = useState<Rule | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
+  const [copiedDetail, setCopiedDetail] = useState(false);
   const deleteConfirmation = useDeleteConfirmation();
+
+  // 从提示词页跳转过来：以此草稿打开新建规则编辑器（仅挂载时处理一次）
+  useEffect(() => {
+    const draft = useUiStore.getState().pendingRuleDraft;
+    if (draft) {
+      setEditing({ id: 0, title: draft.title, content: draft.content, platform: "claude", target_path: null, tags: draft.tags, source: "manual" });
+      useUiStore.getState().setPendingRuleDraft(null);
+    }
+  }, []);
 
  const handleDelete = async (id: number) => {
    await deleteRule(id);
@@ -161,14 +172,6 @@ export default function RulesView() {
           detailRule && (
             <>
               <button
-                onClick={() => handleApply(detailRule.id)}
-                className="btn-icon rounded-full bg-surface-2"
-                title={t("rules.writeTooltip")}
-                aria-label={t("rules.writeTooltip")}
-              >
-                <FileOutput size={14} />
-              </button>
-              <button
                 onClick={() => setEditing(detailRule)}
                 className="btn-icon rounded-full bg-surface-2"
                 title={t("common.edit")}
@@ -194,9 +197,29 @@ export default function RulesView() {
               <span className="text-2xs font-semibold text-faint uppercase tracking-wider">
                 {t("rules.detailContent")}
               </span>
-              {detailRule.target_path && (
-                <span className="ml-auto inline-flex items-center"><PathButton path={detailRule.target_path} /></span>
-              )}
+              <div className="ml-auto flex items-center gap-1.5">
+                {detailRule.target_path && <PathButton path={detailRule.target_path} />}
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(detailRule.content);
+                    setCopiedDetail(true);
+                    setTimeout(() => setCopiedDetail(false), 1500);
+                  }}
+                  className="btn-icon btn-icon-sm"
+                  title={copiedDetail ? t("common.copied") : t("common.copy")}
+                  aria-label={t("common.copy")}
+                >
+                  {copiedDetail ? <Check size={14} /> : <Copy size={14} />}
+                </button>
+                <button
+                  onClick={() => handleApply(detailRule.id)}
+                  className="btn-icon btn-icon-sm"
+                  title={t("rules.writeTooltip")}
+                  aria-label={t("rules.writeTooltip")}
+                >
+                  <FileOutput size={14} />
+                </button>
+              </div>
             </div>
             <pre className="flex-1 min-h-0 overflow-y-auto whitespace-pre-wrap break-words text-xs font-mono text-content leading-relaxed rounded-lg bg-surface-2 p-3">
               {detailRule.content}
@@ -237,7 +260,6 @@ function RuleEditor({
   const [content, setContent] = useState(rule.content);
   const [platform, setPlatform] = useState(rule.platform);
   const [targetPath, setTargetPath] = useState(rule.target_path || "");
-  const [copied, setCopied] = useState(false);
   const isNew = rule.id === 0;
 
   const handleSave = async () => {
@@ -276,12 +298,6 @@ function RuleEditor({
    }
  };
 
- const handleCopy = async () => {
-    await navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/30" />
@@ -291,18 +307,9 @@ function RuleEditor({
       >
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-subtle">
           <h3 className="text-sm font-bold">{isNew ? t("rules.newTitle") : t("rules.editTitle")}</h3>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleCopy}
-              className="btn btn-ghost btn-sm"
-            >
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-              {copied ? t("common.copied") : t("common.copy")}
-            </button>
-            <button onClick={onClose} className="btn-icon">
-              <X size={18} />
-            </button>
-          </div>
+          <button onClick={onClose} className="btn-icon">
+            <X size={18} />
+          </button>
         </div>
 
         <div className="p-5 space-y-3">

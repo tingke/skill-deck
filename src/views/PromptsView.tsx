@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { useAssetsStore } from "../stores/assets";
-import { savePrompt, deletePrompt, saveRule } from "../lib/tauri";
-import { Plus, Trash2, X, Search, FileText, Copy, Check, ScrollText, Edit3 } from "lucide-react";
+import { deletePrompt, savePrompt } from "../lib/tauri";
+import { Plus, Trash2, X, Search, FileText, Copy, Check, ScrollText, Edit3, TriangleAlert } from "lucide-react";
 import type { Prompt } from "../types";
 import { useToastStore } from "../stores/toast";
+import { useUiStore } from "../stores/ui";
 import { useT } from "../i18n";
 import { useDeleteConfirmation } from "../lib/deleteConfirmation";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
@@ -17,9 +18,15 @@ import { EmptyState } from "./MCPView";
 
 const toast = () => useToastStore.getState();
 
+/** 列表/卡片预览：取首个非空行，截断到 120 字符，避免长 prompt 整段进 DOM */
+function previewOf(content: string): string {
+  const firstLine = content.split("\n").find((line) => line.trim()) ?? "";
+  return firstLine.length > 120 ? firstLine.slice(0, 120) + "…" : firstLine;
+}
+
 export default function PromptsView() {
   const t = useT();
-  const { prompts, loadPrompts, loadRules } = useAssetsStore();
+  const { prompts, loadPrompts } = useAssetsStore();
   const [query, setQuery] = useState("");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [editing, setEditing] = useState<Prompt | null>(null);
@@ -36,16 +43,14 @@ export default function PromptsView() {
     toast().show(t("prompts.deleted"), "info");
   };
 
-  const handleApplyToRule = async (prompt: Prompt) => {
-    const platform = prompt.tags.includes("codex")
-      ? "codex"
-      : prompt.tags.includes("claude")
-        ? "claude"
-        : "claude";
-    await saveRule(null, prompt.title, prompt.content, platform, null, prompt.tags);
-    await loadRules();
-    toast().show(t("prompts.appliedToRule", { platform }));
- };
+  const handleApplyToRule = (prompt: Prompt) => {
+    useUiStore.getState().setPendingRuleDraft({
+      title: prompt.title,
+      content: prompt.content,
+      tags: prompt.tags,
+    });
+    useUiStore.getState().setView("rules");
+  };
 
   const allTags = useMemo(
     () => [...new Set(prompts.flatMap((p) => p.tags))].sort((a, b) => a.localeCompare(b)),
@@ -129,7 +134,7 @@ export default function PromptsView() {
                 className={"list-row list-row--generic" + (detailId === p.id ? " list-row--selected" : "")}
               >
                 <span className="list-row__name">{p.title}</span>
-                <span className="list-row__desc font-mono">{p.content}</span>
+                <span className="list-row__desc font-mono">{previewOf(p.content)}</span>
                 <span className="text-2xs text-faint shrink-0">{p.tags.length > 0 ? p.tags.join(" · ") : ""}</span>
                 <ChevronRight size={14} className="list-row__chev" />
               </button>
@@ -142,7 +147,7 @@ export default function PromptsView() {
                 <div className="flex items-start justify-between">
                   <h3 className="text-sm font-semibold text-heading truncate">{p.title}</h3>
                 </div>
-                <p className="text-xs text-faint font-mono mt-1.5 line-clamp-2">{p.content}</p>
+                <p className="text-xs text-faint font-mono mt-1.5 line-clamp-2">{previewOf(p.content)}</p>
                 {p.tags.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-2">
                     {p.tags.map((tag) => (
@@ -229,11 +234,7 @@ export default function PromptsView() {
                 </span>
                 <div className="ml-auto flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                   <button
-                    onClick={() =>
-                      handleApplyToRule(detailPrompt).catch((err) => {
-                        toast().show(t("prompts.applyToRuleFailed", { msg: String(err) }), "error");
-                      })
-                    }
+                    onClick={() => handleApplyToRule(detailPrompt)}
                     className="btn-icon btn-icon-sm"
                     title={t("prompts.applyToRule")}
                     aria-label={t("prompts.applyToRule")}
@@ -247,8 +248,8 @@ export default function PromptsView() {
                       setTimeout(() => setCopiedId(null), 1500);
                     }}
                     className="btn-icon btn-icon-sm"
-                    title={copiedId === detailPrompt.id ? t("common.copied") : t("common.copyAll")}
-                    aria-label={t("common.copyAll")}
+                    title={copiedId === detailPrompt.id ? t("common.copied") : t("common.copy")}
+                    aria-label={t("common.copy")}
                   >
                     {copiedId === detailPrompt.id ? <Check size={16} /> : <Copy size={16} />}
                   </button>
@@ -280,7 +281,17 @@ function PromptEditor({
   const [content, setContent] = useState(prompt.content);
   const [tags, setTags] = useState<string[]>(prompt.tags);
   const [copied, setCopied] = useState(false);
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const isNew = prompt.id === 0;
+  const isDirty =
+    title !== prompt.title || content !== prompt.content ||
+    tags.length !== prompt.tags.length || tags.some((tag, i) => tag !== prompt.tags[i]);
+
+  // 有未保存更改时关闭需确认；无更改直接关闭
+  const requestClose = () => {
+    if (isDirty) setConfirmingDiscard(true);
+    else onClose();
+  };
 
   const handleSave = async () => {
     if (!title.trim() || !content.trim()) return;
@@ -300,7 +311,7 @@ function PromptEditor({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={requestClose}>
       <div className="absolute inset-0 bg-black/30" />
       <div
         className="relative bg-surface rounded-2xl shadow-2xl w-[640px] max-h-[85vh] flex flex-col"
@@ -308,7 +319,7 @@ function PromptEditor({
       >
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-subtle">
           <h3 className="text-sm font-bold">{isNew ? t("prompts.newTitle") : t("prompts.editTitle")}</h3>
-          <button onClick={onClose} className="btn-icon">
+          <button onClick={requestClose} className="btn-icon">
             <X size={18} />
           </button>
         </div>
@@ -342,7 +353,7 @@ function PromptEditor({
             {copied ? <Check size={14} /> : <Copy size={14} />}
             {copied ? t("common.copied") : t("common.copyAll")}
           </button>
-          <button onClick={onClose} className="btn btn-ghost">
+          <button onClick={requestClose} className="btn btn-ghost">
             {t("common.cancel")}
           </button>
           <button
@@ -354,6 +365,33 @@ function PromptEditor({
           </button>
         </div>
       </div>
+      {confirmingDiscard && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center"
+          onClick={(e) => e.target === e.currentTarget && setConfirmingDiscard(false)}
+        >
+          <div className="absolute inset-0 bg-black/30" />
+          <div role="dialog" aria-modal="true" className="connection-dialog relative">
+            <div className="connection-dialog-icon">
+              <TriangleAlert size={18} />
+            </div>
+            <div className="min-w-0">
+              <h3 className="connection-dialog-title">{t("common.discardConfirmTitle")}</h3>
+              <p className="connection-dialog-message">
+                {t("common.discardConfirmMessage", { name: title.trim() || prompt.title })}
+              </p>
+              <div className="connection-dialog-actions">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmingDiscard(false)} autoFocus>
+                  {t("common.cancel")}
+                </button>
+                <button type="button" className="btn btn-danger btn-sm" onClick={onClose}>
+                  {t("common.discardConfirmTitle")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
