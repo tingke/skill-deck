@@ -1,15 +1,15 @@
+import { useState } from "react";
 import { useUiStore } from "../stores/ui";
 import { useSkillsStore } from "../stores/skills";
 import { useActivityStore } from "../stores/activity";
 import { useWorkspaceStore } from "../stores/workspace";
 import { useExtensionsStore } from "../stores/extensions";
 import {
-  BookOpen, Link2, RefreshCw, Link, Unlink, FileDown,
+  ArrowLeft, Link2, RefreshCw, Link, Unlink, FileDown,
   Power, ArchiveRestore, Package, Cpu, FolderTree, ScrollText,
   FolderKanban, Server, Webhook, Trash2, Clock, Radio, ListTodo,
   CheckCircle2,
 } from "lucide-react";
-import { AGENT_COLORS } from "../types";
 import type { ActivityLog } from "../types";
 import { useT } from "../i18n";
 import PageHeader from "../components/PageHeader";
@@ -168,13 +168,15 @@ type TodoAction = {
 
 export default function DashboardView() {
   const t = useT();
-  const { skills, agentOptions } = useSkillsStore();
+  const { skills } = useSkillsStore();
   const globalScan = useSkillsStore((s) => s.globalScan);
   const globalScanning = useSkillsStore((s) => s.globalScanning);
   const { activity, agentActivity: activitySnapshot } = useActivityStore();
   const agents = useWorkspaceStore((s) => s.agents);
   const extensions = useExtensionsStore((s) => s.extensions);
   const setView = useUiStore((s) => s.setView);
+  // 合并卡视图：默认任务进度，可切换到事件流详情
+  const [activityView, setActivityView] = useState<"tasks" | "events">("tasks");
 
   const activityStateColor = (state: string) => {
     if (state === "working") return "bg-emerald-500";
@@ -184,6 +186,7 @@ export default function DashboardView() {
   };
 
   const linkCount = skills.reduce((n, s) => n + s.links.length, 0);
+  const hasActivityData = activitySnapshot.events.length > 0 || activitySnapshot.tasks.length > 0;
 
   const metrics = [
     { label: t(asKey("dashboard.metricSkills")), value: skills.length },
@@ -315,32 +318,8 @@ export default function DashboardView() {
           </div>
         </div>
 
-        {/* Agent status + recent activity */}
+        {/* 最近操作 + Agent 实时动态 */}
         <div className="grid grid-cols-2 gap-3">
-        {/* Agent status */}
-        <div className="card p-4">
-          <h3 className="text-xs font-semibold text-muted mb-3 uppercase tracking-wider">{t("dashboard.agentStatus")}</h3>
-          <div className="space-y-2">
-            {agentOptions.map((rt) => {
-              const count = skills.filter((s) => s.links.includes(rt.id)).length;
-              const color = AGENT_COLORS[rt.id] || AGENT_COLORS.claude;
-              const displayDir = "~/" + rt.default_dir.split("/").slice(-2).join("/");
-              return (
-                <div key={rt.id} className="flex items-center gap-2.5">
-                  <AgentGlyph id={rt.id} label={rt.label} size={22} />
-                  <span className="text-xs dark:text-faint">{rt.label}</span>
-                  <span className="text-[12px] text-muted font-mono ml-auto truncate">{displayDir}</span>
-                  <span className={"text-[12px] font-medium " + color.text}>{t("dashboard.connected", { count })}</span>
-                </div>
-              );
-            })}
-          </div>
-          <button onClick={() => setView("skills")} className="flex items-center gap-1 text-[13px] text-faint hover:text-accent mt-3 transition-colors">
-            <BookOpen size={12} /> {t("dashboard.goSkills")} <Link2 size={12} />
-          </button>
-        </div>
-
-        {/* Recent activity */}
         <div className="card p-4">
           <h3 className="text-xs font-semibold text-muted mb-3 uppercase tracking-wider">{t("dashboard.recentActivity")}</h3>
           {activity.length === 0 ? (
@@ -364,24 +343,41 @@ export default function DashboardView() {
           )}
         </div>
 
-        </div>
-
-        {/* Agent activity + task progress */}
-        <div className="grid grid-cols-2 gap-3">
-        {/* Live Agent activity observed by hooks */}
+        {/* Agent 实时动态：默认任务进度，可切换查看事件流 */}
         <div className="card p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
-            <h3 className="text-xs font-semibold text-muted uppercase tracking-wider">{t("dashboard.agentActivity")}</h3>
-            <button onClick={() => setView("hooks")} className="text-[13px] text-faint hover:text-accent transition-colors">
-              {t("dashboard.configureHooks")}
-            </button>
+            <div className="flex items-center gap-1.5 min-w-0">
+              {activityView === "events" && (
+                <button
+                  onClick={() => setActivityView("tasks")}
+                  className="text-faint hover:text-accent transition-colors shrink-0"
+                  title={t("dashboard.activityBack")}
+                  aria-label={t("dashboard.activityBack")}
+                >
+                  <ArrowLeft size={13} />
+                </button>
+              )}
+              <h3 className="text-xs font-semibold text-muted uppercase tracking-wider">
+                {activityView === "tasks" ? t("dashboard.taskProgress") : t("dashboard.agentActivity")}
+              </h3>
+            </div>
+            <div className="flex items-center gap-2.5 shrink-0">
+              {activityView === "tasks" && hasActivityData && (
+                <button onClick={() => setActivityView("events")} className="text-[13px] text-faint hover:text-accent transition-colors">
+                  {t("dashboard.viewEvents")}
+                </button>
+              )}
+              <button onClick={() => setView("hooks")} className="text-[13px] text-faint hover:text-accent transition-colors">
+                {t("dashboard.configureHooks")}
+              </button>
+            </div>
           </div>
-          {activitySnapshot.events.length === 0 ? (
+          {!hasActivityData ? (
             <div className="mini-empty">
               <div className="mini-empty__icon"><Radio size={15} strokeWidth={1.5} /></div>
               <p className="mini-empty__text">{t("dashboard.noAgentActivity")}</p>
             </div>
-          ) : (
+          ) : activityView === "events" ? (
             <div className="space-y-2">
               {activitySnapshot.events.slice(0, 6).map((event) => (
                 <div key={event.id} className="flex items-center gap-2.5 min-w-0">
@@ -398,14 +394,11 @@ export default function DashboardView() {
                   <span className="text-2xs text-faint shrink-0">{timeAgo(String(event.timestamp), t)}</span>
                 </div>
               ))}
+              {activitySnapshot.events.length === 0 && (
+                <p className="text-2xs text-faint">{t("dashboard.noAgentActivity")}</p>
+              )}
             </div>
-          )}
-        </div>
-
-        {/* Generic task progress reported by hooks */}
-        <div className="card p-4">
-          <h3 className="text-xs font-semibold text-muted mb-3 uppercase tracking-wider">{t("dashboard.taskProgress")}</h3>
-          {activitySnapshot.tasks.length === 0 ? (
+          ) : activitySnapshot.tasks.length === 0 ? (
             <div className="mini-empty">
               <div className="mini-empty__icon"><ListTodo size={15} strokeWidth={1.5} /></div>
               <p className="mini-empty__text">{t("dashboard.noTaskProgress")}</p>
@@ -413,7 +406,12 @@ export default function DashboardView() {
           ) : (
             <div className="space-y-2.5">
               {activitySnapshot.tasks.slice(0, 5).map((task) => (
-                <div key={`${task.projectPath}:${task.taskId}`} className="min-w-0">
+                <div
+                  key={`${task.projectPath}:${task.taskId}`}
+                  className="min-w-0 cursor-pointer"
+                  onClick={() => setActivityView("events")}
+                  title={t("dashboard.viewEvents")}
+                >
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-xs font-medium text-content truncate flex-1">{task.title}</span>
                     <span className="text-2xs text-faint shrink-0">
