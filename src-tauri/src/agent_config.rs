@@ -40,36 +40,47 @@ pub fn agent_by_id(conn: &Connection, id: &str) -> Result<AgentRow, String> {
 
 /// Resolve the real MCP configuration used by the Extension and Package features.
 ///
-/// Claude and Codex have established config locations and formats; their registry
-/// rows are intentionally overridden here so Package apply and Extension scan can
-/// never drift apart again. Custom agents follow their configured config dir/file.
+/// 路径与格式统一由 agent_registry 的 spec 决定（单一事实来源），
+/// Package apply 和 Extension scan 不会各自漂移。
 pub fn mcp_target_for_agent(agent: &AgentRow, home: &Path) -> Result<McpTarget, String> {
-    let (path, format) = match agent.id.as_str() {
-        "claude" => (home.join(".claude.json"), McpConfigFormat::ClaudeJson),
-        "codex" => (
-            home.join(".codex").join("config.toml"),
-            McpConfigFormat::CodexToml,
-        ),
-        _ => {
-            if agent.mcp_config_file.trim().is_empty() {
-                return Err(format!("agent {} 没有配置 MCP 配置文件", agent.id));
+    let format = {
+        let registry_format = crate::agent_registry::spec_by_id(&agent.id)
+            .and_then(|spec| spec.capabilities.mcp);
+        match registry_format {
+            Some(crate::agent_registry::McpFormat::ClaudeJson) => Some(McpConfigFormat::ClaudeJson),
+            Some(crate::agent_registry::McpFormat::CodexToml) => Some(McpConfigFormat::CodexToml),
+            Some(crate::agent_registry::McpFormat::JsonServers) => Some(McpConfigFormat::JsonServers),
+            None => {
+                // 未注册的 agent：按扩展名推断格式。
+                if agent.mcp_config_file.trim().is_empty() {
+                    None
+                } else if agent.mcp_config_file.ends_with(".toml") {
+                    Some(McpConfigFormat::CodexToml)
+                } else {
+                    Some(McpConfigFormat::JsonServers)
+                }
             }
+        }
+    };
+
+    let format = format.ok_or_else(|| format!("agent {} 没有配置 MCP 配置文件", agent.id))?;
+
+    let path = match agent.id.as_str() {
+        // 两个历史遗留路径：registry 中 mcp_config_file 记录的文件名与真实
+        // 用户级配置位置不同（claude.json 在 home 根，codex 在 .codex/config.toml），
+        // 与 registry spec 一致但保持原有绝对路径解析。
+        "claude" => home.join(".claude.json"),
+        "codex" => home.join(".codex").join("config.toml"),
+        _ => {
             let configured = PathBuf::from(&agent.mcp_config_file);
-            let path = if configured.is_absolute() {
+            if configured.is_absolute() {
                 configured
             } else {
                 join_home(home, &agent.config_dir).join(configured)
-            };
-            let format = if path.extension().and_then(|value| value.to_str())
-                == Some("toml")
-            {
-                McpConfigFormat::CodexToml
-            } else {
-                McpConfigFormat::JsonServers
-            };
-            (path, format)
+            }
         }
     };
+
     Ok(McpTarget {
         path: path.to_string_lossy().to_string(),
         format,
@@ -79,6 +90,27 @@ pub fn mcp_target_for_agent(agent: &AgentRow, home: &Path) -> Result<McpTarget, 
 pub fn mcp_target(conn: &Connection, agent_id: &str) -> Result<McpTarget, String> {
     let home = dirs::home_dir().ok_or("无法确定用户主目录")?;
     mcp_target_for_agent(&agent_by_id(conn, agent_id)?, &home)
+}
+
+/// 不依赖 DB 的 mcp_target：agent 必须在 registry 注册。
+pub fn mcp_target_by_id(agent_id: &str) -> Result<McpTarget, String> {
+    let home = dirs::home_dir().ok_or("无法确定用户主目录")?;
+    let spec = crate::agent_registry::spec_by_id(agent_id)
+        .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
+    let agent = AgentRow {
+        id: spec.id.to_string(),
+        label: spec.label.to_string(),
+        skills_dir: spec.skills_dir.to_string(),
+        config_dir: spec.config_dir.to_string(),
+        mcp_config_file: spec.mcp_config_file.to_string(),
+        color: spec.color.to_string(),
+        auto_scan: spec.auto_scan,
+        scan_agents_dir: spec.scan_agents_dir,
+        enabled: true,
+        sort_order: spec.sort_order,
+        capabilities: crate::db::AgentCapabilities::for_agent(agent_id),
+    };
+    mcp_target_for_agent(&agent, &home)
 }
 
 /// Ensure the target is a single file directly under `root`, and never follow or
@@ -398,6 +430,7 @@ mod tests {
             scan_agents_dir: false,
             enabled: true,
             sort_order: 0,
+            capabilities: crate::db::AgentCapabilities::for_agent(id),
         }
     }
 

@@ -278,6 +278,9 @@ export const saveAgent = (agent: AgentRow) =>
 export const toggleAgent = (id: string, enabled: boolean) =>
   invoke("toggle_agent", { id, enabled });
 
+export const reorderAgents = (ids: string[]) =>
+  invoke("reorder_agents", { ids });
+
 export const deleteAgent = (id: string) =>
   invoke("delete_agent", { id });
 

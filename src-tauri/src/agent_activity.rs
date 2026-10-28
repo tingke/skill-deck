@@ -628,11 +628,18 @@ fn merge_nested_hooks(config: &mut Value, command: &str, uninstall: bool) -> Res
     Ok(())
 }
 
+/// 支持活动监听的 agent 及其 hook 配置位置（唯一定义处，见 agent_registry）。
 fn observer_config_path(agent: &str, home: &Path) -> Result<PathBuf, String> {
+    let supported = crate::agent_registry::spec_by_id(agent)
+        .map(|spec| spec.capabilities.activity)
+        .unwrap_or(false);
+    if !supported {
+        return Err("agent must be claude or codex".into());
+    }
     match agent {
         "claude" => Ok(home.join(".claude").join("settings.json")),
         "codex" => Ok(home.join(".codex").join("hooks.json")),
-        _ => Err("agent must be claude or codex".into()),
+        _ => Err("agent has activity capability but no observer config mapping".into()),
     }
 }
 
@@ -835,9 +842,11 @@ pub fn activity_snapshot(mut events: Vec<AgentActivityEvent>) -> AgentActivitySn
 #[tauri::command(async)]
 pub fn get_hook_observer_status() -> Result<Vec<HookObserverStatus>, String> {
     let home = dirs::home_dir().ok_or_else(|| "home directory not found".to_string())?;
-    ["claude", "codex"]
-        .into_iter()
-        .map(|agent| observer_status_for(agent, &home))
+    // 只返回 registry 声明支持 activity 的 agent。
+    crate::agent_registry::SPECS
+        .iter()
+        .filter(|spec| spec.capabilities.activity)
+        .map(|spec| observer_status_for(spec.id, &home))
         .collect()
 }
 

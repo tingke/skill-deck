@@ -977,9 +977,11 @@ function ConfigsTab({
   t: ReturnType<typeof useT>;
 }) {
   const [showRulePicker, setShowRulePicker] = useState(false);
+  const ruleFileName = (agentId: string) =>
+    agentOptions.find((a) => a.id === agentId)?.capabilities.rules?.[0] ?? "CLAUDE.md";
   const add = () => {
     const agent = agentOptions[0]?.id || "claude";
-    setConfigs([...configs, { agent, category: "rules", file_name: agent === "claude" ? "CLAUDE.md" : "AGENTS.md", content: "" }]);
+    setConfigs([...configs, { agent, category: "rules", file_name: ruleFileName(agent), content: "" }]);
   };
   return (
     <div className="px-5 py-3 space-y-2">
@@ -1007,8 +1009,7 @@ function ConfigsTab({
                       key={rule.id}
                       onClick={() => {
                         const agent = rule.platform || agentOptions[0]?.id || "claude";
-                        const file_name = agent === "codex" ? "AGENTS.md" : "CLAUDE.md";
-                        setConfigs([...configs, { agent, category: "rules", file_name, content: rule.content }]);
+                        setConfigs([...configs, { agent, category: "rules", file_name: ruleFileName(agent), content: rule.content }]);
                         setShowRulePicker(false);
                       }}
                       className="w-full flex items-center justify-between gap-2 text-left px-2.5 py-1.5 text-xs text-muted hover:bg-surface-hover"
@@ -1033,7 +1034,7 @@ function ConfigsTab({
                 onChange={(e) => {
                   const next = [...configs];
                   const agent = e.target.value;
-                  next[i] = { ...c, agent, file_name: agent === "claude" ? "CLAUDE.md" : "AGENTS.md" };
+                  next[i] = { ...c, agent, file_name: ruleFileName(agent) };
                   setConfigs(next);
                 }}
                 className="flex-1 min-w-0 px-2 py-1 text-xs border border-border rounded bg-transparent dark:text-content"

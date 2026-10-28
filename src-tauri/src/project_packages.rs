@@ -45,63 +45,12 @@ pub struct ProjectPackageDrift {
     pub has_changes: bool,
 }
 
-struct CommonAgentTemplate {
-    id: &'static str,
-    config_dir: &'static str,
-    mcp_config_file: &'static str,
-    markers: &'static [&'static str],
+fn common_project_agent_specs() -> Vec<(&'static crate::agent_registry::AgentSpec, Vec<String>)> {
+    crate::agent_registry::SPECS
+        .iter()
+        .map(|spec| (spec, spec.project_markers.iter().map(|m| m.to_string()).collect()))
+        .collect()
 }
-
-const COMMON_PROJECT_AGENTS: &[CommonAgentTemplate] = &[
-    CommonAgentTemplate {
-        id: "claude",
-        config_dir: ".claude",
-        mcp_config_file: ".claude.json",
-        markers: &[".claude", "CLAUDE.md", ".claude.json"],
-    },
-    CommonAgentTemplate {
-        id: "codex",
-        config_dir: ".codex",
-        mcp_config_file: "config.toml",
-        markers: &[".codex", "AGENTS.md"],
-    },
-    CommonAgentTemplate {
-        id: "cursor",
-        config_dir: ".cursor",
-        mcp_config_file: ".cursor/mcp.json",
-        markers: &[".cursor", ".cursorrules"],
-    },
-    CommonAgentTemplate {
-        id: "trae",
-        config_dir: ".trae-cn",
-        mcp_config_file: "mcp.json",
-        markers: &[".trae", ".trae-cn"],
-    },
-    CommonAgentTemplate {
-        id: "workbuddy",
-        config_dir: ".workbuddy",
-        mcp_config_file: "mcp.json",
-        markers: &[".workbuddy"],
-    },
-    CommonAgentTemplate {
-        id: "gemini",
-        config_dir: ".gemini",
-        mcp_config_file: "settings.json",
-        markers: &[".gemini", "GEMINI.md"],
-    },
-    CommonAgentTemplate {
-        id: "windsurf",
-        config_dir: ".windsurf",
-        mcp_config_file: "mcp.json",
-        markers: &[".windsurf", ".windsurfrules"],
-    },
-    CommonAgentTemplate {
-        id: "opencode",
-        config_dir: ".opencode",
-        mcp_config_file: "opencode.json",
-        markers: &[".opencode", "opencode.json"],
-    },
-];
 
 fn project_agents(conn: &Connection, root: &Path) -> Vec<ProjectAgentConfig> {
     let mut stmt = match conn.prepare(
@@ -122,19 +71,15 @@ fn project_agents(conn: &Connection, root: &Path) -> Vec<ProjectAgentConfig> {
         .map(|rows| rows.flatten().collect())
         .unwrap_or_default();
 
-    for template in COMMON_PROJECT_AGENTS {
-        if agents.iter().any(|agent| agent.id == template.id) {
+    for (spec, markers) in common_project_agent_specs() {
+        if agents.iter().any(|agent| agent.id == spec.id) {
             continue;
         }
-        if template
-            .markers
-            .iter()
-            .any(|marker| root.join(marker).exists())
-        {
+        if markers.iter().any(|marker| root.join(marker).exists()) {
             agents.push(ProjectAgentConfig {
-                id: template.id.to_string(),
-                config_dir: template.config_dir.to_string(),
-                mcp_config_file: template.mcp_config_file.to_string(),
+                id: spec.id.to_string(),
+                config_dir: spec.config_dir.to_string(),
+                mcp_config_file: spec.mcp_config_file.to_string(),
             });
         }
     }
@@ -151,10 +96,10 @@ fn agent_has_project_marker(root: &Path, agent: &ProjectAgentConfig) -> bool {
     {
         return true;
     }
-    COMMON_PROJECT_AGENTS
+    crate::agent_registry::SPECS
         .iter()
-        .filter(|template| template.id == agent.id)
-        .flat_map(|template| template.markers.iter())
+        .filter(|spec| spec.id == agent.id)
+        .flat_map(|spec| spec.project_markers.iter())
         .any(|marker| root.join(marker).exists())
 }
 
@@ -235,15 +180,7 @@ fn project_relative(root: &Path, value: &str) -> PathBuf {
 }
 
 fn rule_files_for_agent(agent_id: &str) -> &'static [&'static str] {
-    match agent_id {
-        "claude" => &["CLAUDE.md"],
-        "codex" => &["AGENTS.md"],
-        "cursor" => &[".cursorrules"],
-        "gemini" => &["GEMINI.md"],
-        "windsurf" => &[".windsurfrules"],
-        "trae" => &[".trae/rules/project_rules.md"],
-        _ => &["CLAUDE.md", "AGENTS.md"],
-    }
+    crate::agent_registry::rule_files_for(agent_id)
 }
 
 fn push_project_rule(

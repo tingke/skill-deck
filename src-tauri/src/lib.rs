@@ -1,4 +1,5 @@
 pub mod db;
+pub mod agent_registry;
 pub mod agent_config;
 pub mod agent_activity;
 pub mod scanner;
@@ -185,6 +186,7 @@ pub fn run() {
            agents::get_agents,
            agents::save_agent,
            agents::toggle_agent,
+           agents::reorder_agents,
            agents::delete_agent,
            agents::agent_mcp_path,
            // settings (开机启动 / 备份恢复 / 关于 / 更新检查)

@@ -631,6 +631,7 @@ mod tests {
             scan_agents_dir: false,
             enabled: true,
             sort_order: 0,
+            capabilities: crate::db::AgentCapabilities::default(),
         }
     }
 
@@ -800,6 +801,7 @@ mod tests {
             scan_agents_dir,
             enabled: true,
             sort_order: 0,
+            capabilities: crate::db::AgentCapabilities::default(),
         }
     }
 

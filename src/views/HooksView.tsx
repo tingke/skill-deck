@@ -21,6 +21,7 @@ import { AgentGlyph } from "../components/AgentGlyph";
 import { EmptyState } from "./MCPView";
 import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
+import { useWorkspaceStore } from "../stores/workspace";
 
 const toast = () => useToastStore.getState();
 
@@ -181,6 +182,7 @@ export default function HooksView() {
 
 function HookModal({ existing, t, onClose, onDone }: { existing: ExtensionRow | null; t: ReturnType<typeof useT>; onClose: () => void; onDone: () => void }) {
   const isEdit = !!existing;
+  const hookAgents = useWorkspaceStore((s) => s.agents).filter((a) => a.capabilities.hooks);
   const initCfg = (() => { try { return JSON.parse(existing?.config_json || "{}"); } catch { return {}; } })();
   const [runtime, setRuntime] = useState(existing?.runtime || "claude");
   const [event, setEvent] = useState(existing?.name || "PreToolUse");
@@ -222,8 +224,9 @@ function HookModal({ existing, t, onClose, onDone }: { existing: ExtensionRow | 
             <label className="text-[13px] text-faint mb-1 block">{t("hooks.runtimeLabel")}</label>
             <select value={runtime} onChange={(e) => setRuntime(e.target.value)} disabled={isEdit}
               className="w-full px-2.5 py-1.5 text-sm border border-border rounded-lg bg-transparent dark:text-content disabled:opacity-60">
-              <option value="claude">Claude Code</option>
-              <option value="codex">Codex</option>
+              {hookAgents.map((agent) => (
+                <option key={agent.id} value={agent.id}>{agent.label}</option>
+              ))}
             </select>
           </div>
           <div className="flex gap-2">

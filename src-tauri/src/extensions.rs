@@ -15,18 +15,6 @@ fn home() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn claude_json_path() -> PathBuf {
-    claude_json_path_at(&home())
-}
-
-fn claude_settings_path() -> PathBuf {
-    claude_settings_path_at(&home())
-}
-
-fn codex_hooks_path() -> PathBuf {
-    codex_hooks_path_at(&home())
-}
-
 fn codex_config_path() -> PathBuf {
     codex_config_path_at(&home())
 }
@@ -35,12 +23,12 @@ fn claude_json_path_at(home_root: &std::path::Path) -> PathBuf {
     home_root.join(".claude.json")
 }
 
-fn claude_settings_path_at(home_root: &std::path::Path) -> PathBuf {
-    home_root.join(".claude").join("settings.json")
-}
-
-fn codex_hooks_path_at(home_root: &std::path::Path) -> PathBuf {
-    home_root.join(".codex").join("hooks.json")
+/// 从 registry 解析 agent 的 hooks 配置文件绝对路径。
+fn agent_hooks_path_at(agent_id: &str, home_root: &std::path::Path) -> Result<PathBuf, String> {
+    let hooks = crate::agent_registry::spec_by_id(agent_id)
+        .and_then(|spec| spec.capabilities.hooks)
+        .ok_or_else(|| format!("agent {} 不支持 hooks", agent_id))?;
+    Ok(home_root.join(hooks.file))
 }
 
 fn codex_config_path_at(home_root: &std::path::Path) -> PathBuf {
@@ -69,12 +57,21 @@ fn short_hash(s: &str) -> String {
 
 /// 返回某种 kind + runtime 对应的配置文件绝对路径（用于"在访达中打开"）
 pub fn config_file_path(kind: &str, runtime: &str) -> String {
+    let spec = crate::agent_registry::spec_by_id(runtime);
     match (kind, runtime) {
-        ("mcp", "claude") => claude_json_path().to_string_lossy().to_string(),
-        ("mcp", "codex") => codex_config_path().to_string_lossy().to_string(),
-        ("hook", "codex") => codex_hooks_path().to_string_lossy().to_string(),
-        ("hook", _) => claude_settings_path().to_string_lossy().to_string(),
-        ("plugin", _) => codex_config_path().to_string_lossy().to_string(),
+        ("mcp", _) => spec
+            .map(|s| s.capabilities.mcp.is_some())
+            .unwrap_or(false)
+            .then(|| crate::agent_config::mcp_target_by_id(runtime).ok())
+            .flatten()
+            .map(|t| t.path)
+            .unwrap_or_default(),
+        ("hook", _) => agent_hooks_path_at(runtime, &home())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        ("plugin", _) if spec.map(|s| s.capabilities.plugins).unwrap_or(false) => {
+            codex_config_path().to_string_lossy().to_string()
+        }
         _ => String::new(),
     }
 }
@@ -148,8 +145,10 @@ pub fn scan_extensions(conn: &Connection) -> Vec<ExtensionRow> {
         }
     }
 
-    // Agent Hooks — Claude: ~/.claude/settings.json; Codex: ~/.codex/hooks.json
-    for (runtime, hook_config_path) in [("claude", claude_settings_path()), ("codex", codex_hooks_path())] {
+    // Agent Hooks — 每个声明 hooks 能力的 agent，其 hook 配置文件由 registry 决定
+    for spec in crate::agent_registry::SPECS.iter().filter(|s| s.capabilities.hooks.is_some()) {
+        let runtime = spec.id;
+        let Ok(hook_config_path) = agent_hooks_path_at(runtime, &home()) else { continue };
         let config = read_json(&hook_config_path);
         if let Some(hooks) = config.get("hooks").and_then(|v| v.as_object()) {
             for (event, entries) in hooks {
@@ -471,8 +470,7 @@ pub fn toggle_extension(conn: &Connection, id: &str, enabled: bool) -> Result<()
                 )?;
             }
         }
-        ("hook", "claude") => toggle_claude_hook(&name, &config_json, enabled)?,
-        ("hook", "codex") => toggle_codex_hook(&name, &config_json, enabled)?,
+        ("hook", _) => toggle_agent_hook_by_id(&runtime, &name, &config_json, enabled)?,
         ("plugin", "codex") => toggle_codex_plugin(&config_json, enabled)?,
         _ => return Err(format!("unsupported: {} {}", kind, runtime)),
     }
@@ -579,13 +577,13 @@ fn toggle_agent_hook(path: PathBuf, event: &str, config_json: &str, enabled: boo
     write_json(&path, &root)
 }
 
-fn toggle_claude_hook(event: &str, config_json: &str, enabled: bool) -> Result<(), String> {
-    toggle_agent_hook(claude_settings_path(), event, config_json, enabled)
-}
-
-fn toggle_codex_hook(event: &str, config_json: &str, enabled: bool) -> Result<(), String> {
-    toggle_agent_hook(codex_hooks_path(), event, config_json, enabled)?;
-    if enabled {
+/// 按 registry 声明切换任意 agent 的 hook（claude/codex 之外的未来 agent 也走这条路径）。
+fn toggle_agent_hook_by_id(agent_id: &str, event: &str, config_json: &str, enabled: bool) -> Result<(), String> {
+    let spec = crate::agent_registry::spec_by_id(agent_id)
+        .and_then(|s| s.capabilities.hooks)
+        .ok_or_else(|| format!("agent {} 不支持 hooks", agent_id))?;
+    toggle_agent_hook(agent_hooks_path_at(agent_id, &home())?, event, config_json, enabled)?;
+    if enabled && spec.requires_feature_flag {
         ensure_codex_hooks_feature()?;
     }
     Ok(())
@@ -720,14 +718,7 @@ pub fn save_hook(conn: &Connection, input: &HookInput) -> Result<(), String> {
         "timeout": input.timeout,
     });
 
-    if !matches!(input.runtime.as_str(), "claude" | "codex") {
-        return Err(format!("unsupported hook runtime: {}", input.runtime));
-    }
-    if input.runtime == "claude" {
-        toggle_claude_hook(&input.event, &cfg.to_string(), true)?;
-    } else {
-        toggle_codex_hook(&input.event, &cfg.to_string(), true)?;
-    }
+    toggle_agent_hook_by_id(&input.runtime, &input.event, &cfg.to_string(), true)?;
 
     conn.execute(
         "INSERT INTO extensions (id, kind, runtime, name, config_json, enabled, description, source, created_at, updated_at)
@@ -758,12 +749,7 @@ pub fn delete_extension(conn: &Connection, id: &str) -> Result<(), String> {
             let target = agent_config::mcp_target(conn, &runtime)?;
             agent_config::upsert_mcp_entry(&target, &name, "{}", None, true)?;
         }
-        ("hook", "claude") => {
-            toggle_claude_hook(&name, &config_json, false)?;
-        }
-        ("hook", "codex") => {
-            toggle_codex_hook(&name, &config_json, false)?;
-        }
+        ("hook", _) => toggle_agent_hook_by_id(&runtime, &name, &config_json, false)?,
         ("plugin", "codex") => {
             let path = codex_config_path();
             let raw = fs::read_to_string(&path).unwrap_or_default();

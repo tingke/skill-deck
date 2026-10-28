@@ -971,7 +971,7 @@ mod tests {
              CREATE TABLE skill_audits (
                 id INTEGER PRIMARY KEY, skill_id TEXT NOT NULL, content_hash TEXT NOT NULL,
                 verdict TEXT NOT NULL, findings TEXT NOT NULL DEFAULT '[]',
-                score INTEGER NOT NULL DEFAULT 100, created_at TEXT NOT NULL
+                score INTEGER NOT NULL DEFAULT 100, engine_version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL
              );
              CREATE TABLE skill_origins (
                 skill_id TEXT PRIMARY KEY, origin_type TEXT NOT NULL, origin_ref TEXT NOT NULL,

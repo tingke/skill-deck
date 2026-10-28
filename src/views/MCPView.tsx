@@ -242,7 +242,7 @@ export function McpModal({
             className="w-36 px-2.5 py-1.5 text-sm border border-border rounded-lg bg-transparent dark:text-content disabled:opacity-60"
             aria-label={t("mcp.runtimeLabel")}
           >
-            {agentOptions.filter((r) => r.id !== "trae").map((rt) => (
+            {agentOptions.filter((r) => r.capabilities.mcp).map((rt) => (
               <option key={rt.id} value={rt.id}>{rt.label}</option>
             ))}
           </select>

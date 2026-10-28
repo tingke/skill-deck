@@ -12,6 +12,7 @@ pub fn get_agents(db: State<DbState>) -> Result<Vec<AgentRow>, String> {
 }
 
 /// Create or update an agent. If id matches an existing row, update; otherwise insert.
+/// `enabled` 只在插入时生效；已存在的行走 toggle_agent，避免 UPSERT 静默覆盖启停状态。
 #[tauri::command]
 pub fn save_agent(db: State<DbState>, agent: AgentRow) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -23,7 +24,7 @@ pub fn save_agent(db: State<DbState>, agent: AgentRow) -> Result<(), String> {
           label=excluded.label, skills_dir=excluded.skills_dir, config_dir=excluded.config_dir,
           mcp_config_file=excluded.mcp_config_file, color=excluded.color, auto_scan=excluded.auto_scan,
           scan_agents_dir=excluded.scan_agents_dir,
-          enabled=excluded.enabled, sort_order=excluded.sort_order, updated_at=?11",
+          sort_order=excluded.sort_order, updated_at=?11",
        params![
            agent.id,
            agent.label,
@@ -56,14 +57,37 @@ pub fn toggle_agent(db: State<DbState>, id: String, enabled: bool) -> Result<(),
     Ok(())
 }
 
-/// Delete an agent. Built-in claude/codex cannot be deleted.
+/// Persist a full agent ordering (drag & drop). Atomic: single transaction,
+/// no per-agent activity log noise.
+#[tauri::command]
+pub fn reorder_agents(db: State<DbState>, ids: Vec<String>) -> Result<(), String> {
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    for (i, id) in ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE agents SET sort_order=?1, updated_at=?2 WHERE id=?3",
+            params![i as i64, now_iso(), id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Delete an agent. Built-in agents (per registry) cannot be deleted.
+/// Also removes extensions rows owned by this agent to avoid orphans
+/// (scan only covers enabled agents, so they would never be refreshed).
 #[tauri::command]
 pub fn delete_agent(db: State<DbState>, id: String) -> Result<(), String> {
-    if id == "claude" || id == "codex" {
+    if crate::agent_registry::spec_by_id(&id)
+        .map(|spec| spec.capabilities.builtin)
+        .unwrap_or(false)
+    {
         return Err(format!("内置 agent {} 不可删除", id));
     }
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM connections WHERE runtime=?1", params![id]).ok();
+    conn.execute("DELETE FROM extensions WHERE runtime=?1", params![id]).ok();
     conn.execute("DELETE FROM agents WHERE id=?1", params![id])
         .map_err(|e| e.to_string())?;
     log_activity(&conn, "agent_delete", &id);

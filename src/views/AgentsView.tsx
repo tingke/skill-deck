@@ -1,8 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSkillsStore } from "../stores/skills";
 import { useExtensionsStore } from "../stores/extensions";
 import { useWorkspaceStore } from "../stores/workspace";
-import { saveAgent, deleteAgent, toggleAgent } from "../lib/tauri";
+import { saveAgent, deleteAgent, toggleAgent, pickFolder, getHomeDirectory } from "../lib/tauri";
 import { useToastStore } from "../stores/toast";
 import { useT } from "../i18n";
 import {
@@ -11,10 +11,8 @@ import {
   Trash2,
   Edit3,
   X,
-  FolderTree,
-  FileCog,
-  ToggleLeft,
-  ToggleRight,
+  FolderOpen,
+  Power,
   ChevronRight,
 } from "lucide-react";
 import { useViewMode } from "../lib/useViewMode";
@@ -29,6 +27,12 @@ import { AgentGlyph } from "../components/AgentGlyph";
 import PageHeader from "../components/PageHeader";
 
 const toast = () => useToastStore.getState();
+
+/// 把选出的绝对路径转为 ~/ 相对路径展示（保持 DB 存储约定）。
+function relativeToHome(abs: string, home = "") {
+  const h = home.endsWith("/") ? home : home + "/";
+  return abs.startsWith(h) ? abs.slice(h.length) : abs;
+}
 
 const COLOR_MAP: Record<string, { dot: string; text: string; border: string }> = {
   orange: { dot: "bg-orange-500", text: "text-orange-600", border: "border-orange-300" },
@@ -76,7 +80,7 @@ export default function AgentsView() {
   };
 
   const handleDelete = async (agent: AgentRow) => {
-    if (agent.id === "claude" || agent.id === "codex") return;
+    if (agent.capabilities.builtin) return;
     try {
       await deleteAgent(agent.id);
       await loadAgents();
@@ -119,7 +123,7 @@ export default function AgentsView() {
         {viewMode === "list" ? (
           <div className="list-panel mx-6 mb-6">
             {filteredAgents.map((a) => (
-              <button
+              <div
                 key={a.id}
                 onClick={() => setDetailId(a.id)}
                 className={"list-row list-row--generic" + (a.enabled ? "" : " opacity-60")}
@@ -128,12 +132,23 @@ export default function AgentsView() {
                   <AgentGlyph id={a.id} label={a.label} size={18} active={a.enabled} />
                   <span className="list-row__name">{a.label}</span>
                 </span>
-                <span className="list-row__desc font-mono">~/{a.skills_dir}</span>
-                <span className="text-2xs text-faint shrink-0 tnum">
-                  {countSkills(a.id)} skills · {countExt(a.id, "mcp")} mcp
+                <span className="flex items-center gap-1.5 min-w-0">
+                  {[
+                    { key: "skills", count: countSkills(a.id), show: true },
+                    { key: "mcp", count: countExt(a.id, "mcp"), show: !!a.capabilities.mcp },
+                    { key: "plugins", count: countExt(a.id, "plugin"), show: a.capabilities.plugins },
+                    { key: "hooks", count: countExt(a.id, "hook"), show: a.capabilities.hooks },
+                  ].filter((s) => s.show).map((s) => (
+                    <span key={s.key} className={`badge shrink-0 tnum ${s.count === 0 ? "bg-surface-2 text-faint" : "bg-accent-soft text-accent"}`}>
+                      {s.count} {s.key}
+                    </span>
+                  ))}
+                </span>
+                <span className={`badge shrink-0 font-medium ${a.enabled ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400" : "text-faint bg-surface-2"}`}>
+                  {a.enabled ? t("common.enabled") : t("common.disabled")}
                 </span>
                 <ChevronRight size={14} className="list-row__chev" />
-              </button>
+              </div>
             ))}
           </div>
         ) : (
@@ -144,9 +159,7 @@ export default function AgentsView() {
               <div
                 key={a.id}
                 onClick={() => setDetailId(a.id)}
-                className={`card p-4 flex flex-col ${
-                  a.enabled ? "" : "opacity-60"
-                } cursor-pointer`}
+                className={`card p-4 flex flex-col ${a.enabled ? "" : "opacity-60"} cursor-pointer`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
@@ -160,50 +173,25 @@ export default function AgentsView() {
                           </span>
                         )}
                       </h3>
-                      <code className="text-[12px] text-faint font-mono">{a.id}</code>
+                      <code className="text-[12px] text-faint font-mono">{a.sort_order}</code>
                     </div>
                   </div>
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggle(a);
-                      }}
-                      title={a.enabled ? t("agents.enableHint") : t("agents.disableHint")}
-                      className={`p-1 ${a.enabled ? "text-accent" : "text-faint"}`}
-                    >
-                      {a.enabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-3 space-y-1.5">
-                  <div className="flex items-center gap-2 text-[13px] text-muted">
-                    <FolderTree size={12} className="shrink-0 text-faint" />
-                    <code className="font-mono truncate">~/{a.skills_dir}</code>
-                  </div>
-                  <div className="flex items-center gap-2 text-[13px] text-muted">
-                    <FileCog size={12} className="shrink-0 text-faint" />
-                    <code className="font-mono truncate">~/{a.config_dir}/{a.mcp_config_file || t("common.none")}</code>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 mt-3 text-[13px]">
-                  <span className="text-faint">
-                    <span className={`font-semibold ${countSkills(a.id) === 0 ? "text-faint" : c.text}`}>{countSkills(a.id)}</span> skills
-                  </span>
-                  <span className="text-faint">
-                    <span className={`font-semibold ${countExt(a.id, "mcp") === 0 ? "text-faint" : c.text}`}>{countExt(a.id, "mcp")}</span> mcp
-                  </span>
-                  <span className="text-faint">
-                    <span className={`font-semibold ${countExt(a.id, "plugin") === 0 ? "text-faint" : c.text}`}>{countExt(a.id, "plugin")}</span> plugins
-                  </span>
-                  <span className="text-faint">
-                    <span className={`font-semibold ${countExt(a.id, "hook") === 0 ? "text-faint" : c.text}`}>{countExt(a.id, "hook")}</span> hooks
-                  </span>
-                  <span className={`badge font-medium ${a.enabled ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400" : "text-faint bg-surface-2"}`}>
+                  <span className={`badge shrink-0 font-medium ${a.enabled ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400" : "text-faint bg-surface-2"}`}>
                     {a.enabled ? t("common.enabled") : t("common.disabled")}
                   </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+                  {[
+                    { key: "skills", count: countSkills(a.id), show: true, hot: countSkills(a.id) > 0 },
+                    { key: "mcp", count: countExt(a.id, "mcp"), show: !!a.capabilities.mcp, hot: countExt(a.id, "mcp") > 0 },
+                    { key: "plugins", count: countExt(a.id, "plugin"), show: a.capabilities.plugins, hot: countExt(a.id, "plugin") > 0 },
+                    { key: "hooks", count: countExt(a.id, "hook"), show: a.capabilities.hooks, hot: countExt(a.id, "hook") > 0 },
+                  ].filter((s) => s.show).map((s) => (
+                    <span key={s.key} className={`badge tnum ${s.hot ? `bg-accent-soft ${c.text}` : "bg-surface-2 text-faint"}`}>
+                      {s.count} {s.key}
+                    </span>
+                  ))}
                 </div>
               </div>
             );
@@ -269,7 +257,7 @@ export default function AgentsView() {
                 title={detailAgent.enabled ? t("agents.disableAction") : t("agents.enableAction")}
                 aria-label={detailAgent.enabled ? t("agents.disableAction") : t("agents.enableAction")}
               >
-                {detailAgent.enabled ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
+                <Power size={14} />
               </button>
               <button
                 onClick={() => setEditing(detailAgent)}
@@ -279,7 +267,7 @@ export default function AgentsView() {
               >
                 <Edit3 size={14} />
               </button>
-              {detailAgent.id !== "claude" && detailAgent.id !== "codex" && (
+              {!detailAgent.capabilities.builtin && (
                 <button
                   onClick={() => deleteConfirmation.request(detailAgent.label, () => handleDeleteFromDetail(detailAgent))}
                   className="btn-icon rounded-full bg-surface-2 text-red-500 hover:text-red-600"
@@ -295,12 +283,8 @@ export default function AgentsView() {
       >
         {detailAgent && (
           <>
-            {/* Paths */}
+            {/* Paths + stats */}
             <section className="px-5 py-3.5 border-b border-border-subtle space-y-2">
-              <div className="flex items-center gap-1.5 mb-1">
-                <FolderTree size={12} className="text-faint" />
-                <span className="text-2xs font-semibold text-faint uppercase tracking-wider">{t("agents.detailPaths")}</span>
-              </div>
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-faint w-20 shrink-0">{t("agents.detailSkillsDir")}</span>
                 <code className="font-mono text-muted truncate">~/{detailAgent.skills_dir}</code>
@@ -309,55 +293,34 @@ export default function AgentsView() {
                 <span className="text-faint w-20 shrink-0">{t("agents.detailConfigDir")}</span>
                 <code className="font-mono text-muted truncate">~/{detailAgent.config_dir}</code>
               </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-faint w-20 shrink-0">{t("agents.detailMcpFile")}</span>
-                <code className="font-mono text-muted truncate">{detailAgent.mcp_config_file || t("common.none")}</code>
-              </div>
-            </section>
-
-            {/* Stats */}
-            <section className="px-5 py-3.5 border-b border-border-subtle">
-              <div className="flex items-center gap-1.5 mb-2">
-                <Cpu size={12} className="text-faint" />
-                <span className="text-2xs font-semibold text-faint uppercase tracking-wider">{t("agents.detailStats")}</span>
-              </div>
-              <div className="grid grid-cols-4 gap-2">
+              {detailAgent.capabilities.mcp && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-faint w-20 shrink-0">{t("agents.detailMcpFile")}</span>
+                  <code className="font-mono text-muted truncate">{detailAgent.mcp_config_file || t("common.none")}</code>
+                </div>
+              )}
+              <div className="flex items-center gap-1.5 pt-1.5 flex-wrap">
                 {[
-                  ["skills", countSkills(detailAgent.id)],
-                  ["mcp", countExt(detailAgent.id, "mcp")],
-                  ["plugins", countExt(detailAgent.id, "plugin")],
-                  ["hooks", countExt(detailAgent.id, "hook")],
-                ].map(([label, count]) => (
-                  <div key={String(label)} className="rounded-lg bg-surface-2 px-2 py-2 text-center">
-                    <div className={`text-sm font-semibold ${Number(count) === 0 ? "text-faint" : colorOf(detailAgent.color).text}`}>{count}</div>
-                    <div className="text-2xs text-faint">{label}</div>
-                  </div>
+                  { key: "skills", count: countSkills(detailAgent.id), show: true },
+                  { key: "mcp", count: countExt(detailAgent.id, "mcp"), show: !!detailAgent.capabilities.mcp },
+                  { key: "plugins", count: countExt(detailAgent.id, "plugin"), show: detailAgent.capabilities.plugins },
+                  { key: "hooks", count: countExt(detailAgent.id, "hook"), show: detailAgent.capabilities.hooks },
+                ].filter((s) => s.show).map((s) => (
+                  <span key={s.key} className={`badge tnum ${s.count === 0 ? "bg-surface-2 text-faint" : "bg-accent-soft text-accent"}`}>
+                    {s.count} {s.key}
+                  </span>
                 ))}
               </div>
             </section>
 
-            {/* Scan options */}
-            <section className="px-5 py-3.5 border-b border-border-subtle space-y-2">
-              <span className="text-2xs font-semibold text-faint uppercase tracking-wider block">{t("agents.detailScanOptions")}</span>
+            {/* Options */}
+            <section className="px-5 py-3.5 space-y-2">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className={`badge ${detailAgent.auto_scan ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-surface-2 text-faint"}`}>
-                  auto-scan
+                  {t("agents.autoScanLabel")}
                 </span>
                 <span className={`badge ${detailAgent.scan_agents_dir ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-surface-2 text-faint"}`}>
-                  .agents/skills
-                </span>
-              </div>
-              <p className="text-2xs text-faint leading-relaxed">{t("agents.autoScanLabel")}</p>
-            </section>
-
-            {/* Meta */}
-            <section className="px-5 py-3.5 space-y-2">
-              <span className="text-2xs font-semibold text-faint uppercase tracking-wider block">{t("agents.detailInfo")}</span>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-faint w-20 shrink-0">{t("common.color")}</span>
-                <span className="flex items-center gap-1.5">
-                  <span className={`w-3 h-3 rounded-full ${colorOf(detailAgent.color).dot}`} />
-                  <span className="text-muted">{detailAgent.color}</span>
+                  {t("agents.scanAgentsDirLabel")}
                 </span>
               </div>
               <div className="flex items-center gap-2 text-xs">
@@ -383,7 +346,7 @@ function AgentEditor({
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [id, setId] = useState(editing?.id || "");
+  const [id] = useState(editing?.id || "");
   const [label, setLabel] = useState(editing?.label || "");
   const [skillsDir, setSkillsDir] = useState(editing?.skills_dir || "");
   const [configDir, setConfigDir] = useState(editing?.config_dir || "");
@@ -392,13 +355,26 @@ function AgentEditor({
  const [autoScan, setAutoScan] = useState(editing?.auto_scan || false);
  const [scanAgentsDir, setScanAgentsDir] = useState(editing?.scan_agents_dir || false);
  const [sortOrder, setSortOrder] = useState(editing?.sort_order ?? 99);
- // 编辑时保留原启用状态（后端 UPSERT 会无条件覆盖 enabled）
- const enabled = editing?.enabled ?? true;
+  const [enabled, setEnabled] = useState(editing?.enabled ?? true);
+  const [home, setHome] = useState("");
+  useEffect(() => { getHomeDirectory().then(setHome).catch(() => {}); }, []);
 
   const isEditing = !!editing;
 
+  // 新建时从显示名自动生成 ID：中文转拼音不可行，直接 slugify；
+  // 全中文等无 ASCII 字符时回退 "agent"，与既有 id 冲突时追加数字。
+  const autoId = () => {
+    const slug = label.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    if (!slug) return "agent";
+    const existing = new Set(useWorkspaceStore.getState().agents.map((a) => a.id));
+    if (!existing.has(slug)) return slug;
+    let n = 2;
+    while (existing.has(`${slug}-${n}`)) n++;
+    return `${slug}-${n}`;
+  };
+
   const handleSave = async () => {
-    if (!id.trim() || !label.trim()) {
+    if (!label.trim()) {
       toast().show(t("agents.idNameRequired"), "error");
       return;
     }
@@ -406,8 +382,9 @@ function AgentEditor({
       toast().show(t("agents.skillsDirRequired"), "error");
       return;
     }
+    const agentId = isEditing ? id : autoId();
     const agent: AgentRow = {
-      id: id.trim().toLowerCase().replace(/\s+/g, "-"),
+      id: agentId,
       label: label.trim(),
       skills_dir: skillsDir.trim(),
       config_dir: configDir.trim() || skillsDir.trim(),
@@ -417,9 +394,22 @@ function AgentEditor({
      scan_agents_dir: scanAgentsDir,
      enabled,
      sort_order: sortOrder,
+     capabilities: editing?.capabilities ?? {
+       skills: true,
+       mcp: mcpFile.trim() ? "json_servers" : null,
+       hooks: false,
+       plugins: false,
+       rules: null,
+       activity: false,
+       builtin: false,
+     },
     };
     try {
       await saveAgent(agent);
+      // 编辑已有 agent 时 enabled 不随 UPSERT 保存，单独走 toggle。
+      if (isEditing && editing && editing.enabled !== enabled) {
+        await toggleAgent(agentId, enabled);
+      }
       toast().show(isEditing ? t("agents.saved") : t("agents.created"));
       onDone();
     } catch (e) {
@@ -444,47 +434,64 @@ function AgentEditor({
         </div>
 
         <div className="px-5 py-4 space-y-3 flex-1 overflow-y-auto">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[13px] text-faint mb-1 block">{t("agents.idLabel")}</label>
-              <input
-                value={id}
-                onChange={(e) => setId(e.target.value)}
-                disabled={isEditing}
-                placeholder={t("agents.idPlaceholder")}
-                className="input input-mono disabled:opacity-50"
-              />
-            </div>
-            <div>
-              <label className="text-[13px] text-faint mb-1 block">{t("agents.displayLabel")}</label>
-              <input
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                placeholder={t("agents.displayPlaceholder")}
-                className="input"
-              />
-            </div>
+          <div>
+            <label className="text-[13px] text-faint mb-1 block">{t("agents.displayLabel")}</label>
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder={t("agents.displayPlaceholder")}
+              className="input"
+            />
+            {isEditing && (
+              <p className="text-2xs text-faint mt-1 font-mono">{id}</p>
+            )}
           </div>
 
           <div>
             <label className="text-[13px] text-faint mb-1 block">{t("agents.skillsDir")}</label>
-            <input
-              value={skillsDir}
-              onChange={(e) => setSkillsDir(e.target.value)}
-              placeholder=".cursor/skills"
-              className="input input-mono"
-            />
+            <div className="flex gap-1.5">
+              <input
+                value={skillsDir}
+                onChange={(e) => setSkillsDir(e.target.value)}
+                placeholder=".cursor/skills"
+                className="input input-mono flex-1"
+              />
+              <button
+                onClick={async () => {
+                  const dir = await pickFolder();
+                  if (!dir) return;
+                  setSkillsDir(relativeToHome(dir, home));
+                  if (!configDir.trim()) setConfigDir(relativeToHome(dir.replace(/\/skills\/?$/, ""), home));
+                }}
+                className="btn-icon shrink-0"
+                title={t("agents.pickDir")}
+              >
+                <FolderOpen size={15} />
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[13px] text-faint mb-1 block">{t("agents.configDir")}</label>
-              <input
-                value={configDir}
-                onChange={(e) => setConfigDir(e.target.value)}
-                placeholder=".cursor"
-                className="input input-mono"
-              />
+              <div className="flex gap-1.5">
+                <input
+                  value={configDir}
+                  onChange={(e) => setConfigDir(e.target.value)}
+                  placeholder=".cursor"
+                  className="input input-mono flex-1 min-w-0"
+                />
+                <button
+                  onClick={async () => {
+                    const dir = await pickFolder();
+                    if (dir) setConfigDir(relativeToHome(dir, home));
+                  }}
+                  className="btn-icon shrink-0"
+                  title={t("agents.pickDir")}
+                >
+                  <FolderOpen size={15} />
+                </button>
+              </div>
             </div>
             <div>
               <label className="text-[13px] text-faint mb-1 block">{t("agents.mcpFile")}</label>
@@ -497,10 +504,10 @@ function AgentEditor({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 items-start">
             <div>
               <label className="text-[13px] text-faint mb-1 block">{t("common.color")}</label>
-              <div className="flex items-center gap-1.5 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-wrap pt-1">
                 {Object.entries(COLOR_MAP).map(([name, c]) => (
                   <button
                     key={name}
@@ -545,6 +552,19 @@ function AgentEditor({
            />
            <span className="text-sm text-muted">
              {t("agents.scanAgentsDirLabel")}
+           </span>
+         </label>
+
+         <label className="flex items-center gap-2 cursor-pointer">
+           <input
+             type="checkbox"
+             checked={enabled}
+             onChange={(e) => setEnabled(e.target.checked)}
+             className="w-4 h-4 accent-slate-900"
+           />
+           <span className="text-sm text-muted">
+             {enabled ? t("common.enabled") : t("common.disabled")}
+             <span className="text-2xs text-faint ml-1.5">{t("agents.enabledLabel")}</span>
            </span>
          </label>
         </div>

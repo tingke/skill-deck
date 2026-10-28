@@ -5,38 +5,8 @@ use std::sync::Mutex;
 
 pub struct DbState(pub Mutex<Connection>);
 
-/// All runtimes the app manages. Add new runtimes here.
-pub const RUNTIMES: &[RuntimeConfig] = &[
-    RuntimeConfig {
-        id: "claude",
-        label: "Claude",
-        dir: ".claude/skills",
-        color: "orange",
-        auto_scan: false,
-    },
-    RuntimeConfig {
-        id: "codex",
-        label: "Codex",
-        dir: ".agents/skills",
-        color: "green",
-        auto_scan: true,
-    },
-    RuntimeConfig {
-        id: "trae",
-        label: "Trae",
-        dir: ".trae-cn/skills",
-        color: "blue",
-        auto_scan: false,
-    },
-    RuntimeConfig {
-        id: "workbuddy",
-        label: "WorkBuddy",
-        dir: ".workbuddy/skills",
-        color: "violet",
-        auto_scan: false,
-    },
-];
-
+/// 兼容别名：历史上前端 `get_runtimes` 的回退数据。
+/// 现在统一来自 agent_registry::SPECS，新增 Agent 只改 registry。
 pub struct RuntimeConfig {
     pub id: &'static str,
     pub label: &'static str,
@@ -44,6 +14,13 @@ pub struct RuntimeConfig {
     pub color: &'static str,
     pub auto_scan: bool,
 }
+
+pub const RUNTIMES: &[RuntimeConfig] = &[
+    RuntimeConfig { id: "claude", label: "Claude", dir: ".claude/skills", color: "orange", auto_scan: false },
+    RuntimeConfig { id: "codex", label: "Codex", dir: ".codex/skills", color: "green", auto_scan: false },
+    RuntimeConfig { id: "trae", label: "Trae", dir: ".trae-cn/skills", color: "blue", auto_scan: false },
+    RuntimeConfig { id: "workbuddy", label: "WorkBuddy", dir: ".workbuddy/skills", color: "violet", auto_scan: false },
+];
 
 pub fn runtime_ids() -> Vec<&'static str> {
     RUNTIMES.iter().map(|r| r.id).collect()
@@ -269,6 +246,7 @@ pub(crate) fn migrate(conn: &Connection) {
            verdict      TEXT NOT NULL,
            findings     TEXT NOT NULL DEFAULT '[]',
            score        INTEGER NOT NULL DEFAULT 100,
+           engine_version INTEGER NOT NULL DEFAULT 1, -- 体检引擎版本，升级后旧缓存按版本失效
            created_at   TEXT NOT NULL
        );
        CREATE INDEX IF NOT EXISTS idx_skill_audits_skill
@@ -417,71 +395,10 @@ pub(crate) fn migrate(conn: &Connection) {
         }
     }
 
-    // Seed default agents if table is empty
-    {
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM agents", [], |r| r.get(0))
-            .unwrap_or(0);
-        if count == 0 {
-            let defaults = [
-                (
-                    "claude",
-                    "Claude",
-                    ".claude/skills",
-                    ".claude",
-                    ".claude.json",
-                    "orange",
-                    0,
-                    0,
-                    1,
-                    0,
-                ),
-                (
-                    "codex",
-                    "Codex",
-                    ".codex/skills",
-                    ".codex",
-                    "config.toml",
-                    "green",
-                    0,
-                    1,
-                    1,
-                    1,
-                ),
-                (
-                    "trae",
-                    "Trae",
-                    ".trae-cn/skills",
-                    ".trae-cn",
-                    "mcp.json",
-                    "blue",
-                    0,
-                    0,
-                    1,
-                    2,
-                ),
-                (
-                    "workbuddy",
-                    "WorkBuddy",
-                    ".workbuddy/skills",
-                    ".workbuddy",
-                    "mcp.json",
-                    "violet",
-                    0,
-                    0,
-                    1,
-                    3,
-                ),
-            ];
-            for (id, label, sdir, cdir, mcp, color, auto, scan_ag, en, ord) in defaults {
-                conn.execute(
-                   "INSERT INTO agents (id, label, skills_dir, config_dir, mcp_config_file, color, auto_scan, scan_agents_dir, enabled, sort_order, created_at, updated_at)
-                    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11)",
-                   params![id, label, sdir, cdir, mcp, color, auto, scan_ag, en, ord, now_iso()],
-               ).ok();
-            }
-        }
-    }
+    // Seed agents from the registry (upsert by id).
+    // 与旧逻辑（表空才 seed）不同：老库会自动补齐新版本新增的内置 Agent，
+    // 已存在的行不被覆盖，保留用户改动。
+    crate::agent_registry::seed_agents(conn);
 
     // Migration: add `enabled` column to skills table
     {
@@ -553,6 +470,27 @@ pub(crate) fn migrate(conn: &Connection) {
         }
     }
 
+    // Migration: add `engine_version` column to skill_audits（规则引擎升级后旧缓存按版本失效重算）
+    {
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(skill_audits)")
+            .ok()
+            .map(|mut s| {
+                s.query_map([], |r| r.get::<_, String>(1))
+                    .ok()
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        if !cols.is_empty() && !cols.iter().any(|c| c == "engine_version") {
+            conn.execute(
+                "ALTER TABLE skill_audits ADD COLUMN engine_version INTEGER NOT NULL DEFAULT 1",
+                [],
+            )
+            .ok();
+        }
+    }
+
     // Migration: old presets table used skill_names column
     let has_skill_names: bool = {
         let cols: Vec<String> = conn
@@ -596,6 +534,70 @@ mod migration_tests {
     use super::*;
 
     #[test]
+    fn migrate_seeds_builtin_agents_into_fresh_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn);
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM agents", [], |row| row.get(0))
+            .unwrap();
+        let seeded = crate::agent_registry::SPECS
+            .iter()
+            .filter(|spec| spec.seeded)
+            .count() as i64;
+        assert_eq!(count, seeded);
+    }
+
+    #[test]
+    fn migrate_seeds_new_builtin_agents_into_legacy_database_without_overwrite() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE agents (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                skills_dir TEXT,
+                config_dir TEXT,
+                mcp_config_file TEXT,
+                color TEXT,
+                auto_scan INTEGER DEFAULT 0,
+                scan_agents_dir INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER DEFAULT 1,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO agents (id, label, skills_dir, config_dir, mcp_config_file, color, sort_order, created_at, updated_at)
+            VALUES ('claude', 'My Claude', '.custom/skills', '.custom', 'custom.json', 'pink', 99, 'old', 'old');
+            "#,
+        )
+        .unwrap();
+        migrate(&conn);
+
+        // 已有内置 agent：保留用户改动，不被 seed 覆盖
+        let (label, skills_dir, sort_order): (String, String, i64) = conn
+            .query_row(
+                "SELECT label, skills_dir, sort_order FROM agents WHERE id = 'claude'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(label, "My Claude");
+        assert_eq!(skills_dir, ".custom/skills");
+        assert_eq!(sort_order, 99);
+
+        // 其余 seeded agent 仍被补齐
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM agents", [], |row| row.get(0))
+            .unwrap();
+        let seeded = crate::agent_registry::SPECS
+            .iter()
+            .filter(|spec| spec.seeded)
+            .count() as i64;
+        assert_eq!(count, seeded);
+    }
+
+    #[test]
     fn migrate_creates_audit_and_origin_tables() {
         let conn = Connection::open_in_memory().unwrap();
         migrate(&conn);
@@ -636,6 +638,35 @@ mod migration_tests {
             )
             .unwrap();
         assert_eq!(has_score, 1);
+    }
+
+    #[test]
+    fn migrate_adds_engine_version_column_to_existing_skill_audits() {
+        let conn = Connection::open_in_memory().unwrap();
+        // 模拟 v1 引擎的旧库：skill_audits 已有 score 但没有 engine_version
+        conn.execute(
+            "CREATE TABLE skill_audits (
+                id INTEGER PRIMARY KEY,
+                skill_id TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                findings TEXT NOT NULL DEFAULT '[]',
+                score INTEGER NOT NULL DEFAULT 100,
+                created_at TEXT NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+        migrate(&conn);
+
+        let has_version: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('skill_audits') WHERE name = 'engine_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_version, 1);
     }
 
     #[test]
@@ -747,6 +778,7 @@ pub struct RuntimeInfo {
     pub mcp_config_file: String,
     pub enabled: bool,
     pub sort_order: i64,
+    pub capabilities: AgentCapabilities,
 }
 
 // ===================== Agent (运行环境注册表) =====================
@@ -763,6 +795,43 @@ pub struct AgentRow {
     pub scan_agents_dir: bool,
     pub enabled: bool,
     pub sort_order: i64,
+    /// 能力声明，来自 agent_registry（builtin agent）或默认值（用户自建）。
+    pub capabilities: AgentCapabilities,
+}
+
+/// 前端按能力渲染入口，而不是按 agent id 特判。
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct AgentCapabilities {
+    pub skills: bool,
+    /// MCP 格式：claude_json / codex_toml / json_servers / null。
+    pub mcp: Option<String>,
+    pub hooks: bool,
+    pub plugins: bool,
+    /// 项目 rules 目标文件；None 表示回退 CLAUDE.md/AGENTS.md。
+    pub rules: Option<Vec<String>>,
+    pub activity: bool,
+    /// 内置 agent，不可删除。
+    pub builtin: bool,
+}
+
+impl AgentCapabilities {
+    pub fn for_agent(id: &str) -> AgentCapabilities {
+        match crate::agent_registry::spec_by_id(id) {
+            Some(spec) => {
+                let json = spec.capabilities_json();
+                serde_json::from_str(&json).unwrap_or_default()
+            }
+            None => AgentCapabilities {
+                skills: true,
+                mcp: None,
+                hooks: false,
+                plugins: false,
+                rules: None,
+                activity: false,
+                builtin: false,
+            },
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -783,7 +852,7 @@ pub fn db_agents(conn: &Connection) -> Vec<AgentRow> {
     let mut stmt = match conn.prepare(
         "SELECT id, label, skills_dir, config_dir, mcp_config_file, color,
               auto_scan, scan_agents_dir, enabled, sort_order
-       FROM agents ORDER BY label COLLATE NOCASE",
+       FROM agents ORDER BY sort_order, label COLLATE NOCASE",
     ) {
         Ok(s) => s,
         Err(_) => return vec![],
@@ -800,6 +869,7 @@ pub fn db_agents(conn: &Connection) -> Vec<AgentRow> {
             scan_agents_dir: row.get::<_, i64>(7)? != 0,
             enabled: row.get::<_, i64>(8)? != 0,
             sort_order: row.get(9)?,
+            capabilities: AgentCapabilities::for_agent(&row.get::<_, String>(0)?),
         })
     });
     rows.ok()

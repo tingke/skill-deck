@@ -53,6 +53,7 @@ export interface AuditScoreModel {
 export interface AuditRulesResponse {
   rules: AuditRuleInfo[];
   score_model: AuditScoreModel;
+  engine_version: number;
 }
 
 export interface SkillAuditSummary {
@@ -152,6 +153,19 @@ export interface ActivityLog {
   created_at: string;
 }
 
+export interface AgentCapabilities {
+  skills: boolean;
+  /** MCP 格式：claude_json / codex_toml / json_servers / null = 不支持 */
+  mcp: string | null;
+  hooks: boolean;
+  plugins: boolean;
+  /** 项目 rules 目标文件；null 表示回退 CLAUDE.md/AGENTS.md */
+  rules: string[] | null;
+  activity: boolean;
+  /** 内置 agent，不可删除 */
+  builtin: boolean;
+}
+
 export interface AgentInfo {
   id: string;
   label: string;
@@ -163,6 +177,7 @@ export interface AgentInfo {
   mcp_config_file: string;
   enabled: boolean;
   sort_order: number;
+  capabilities: AgentCapabilities;
 }
 
 export const AGENT_COLORS: Record<string, { bg: string; dot: string; text: string }> = {
@@ -170,7 +185,18 @@ export const AGENT_COLORS: Record<string, { bg: string; dot: string; text: strin
   codex: { bg: "bg-green-600", dot: "bg-green-500", text: "text-green-600" },
   trae: { bg: "bg-sky-600", dot: "bg-sky-500", text: "text-sky-600" },
   workbuddy: { bg: "bg-violet-600", dot: "bg-violet-500", text: "text-violet-600" },
+  cursor: { bg: "bg-slate-500", dot: "bg-slate-400", text: "text-slate-600" },
+  gemini: { bg: "bg-sky-500", dot: "bg-sky-400", text: "text-sky-500" },
+  windsurf: { bg: "bg-teal-500", dot: "bg-teal-400", text: "text-teal-600" },
+  opencode: { bg: "bg-amber-500", dot: "bg-amber-400", text: "text-amber-600" },
 };
+
+/** 未匹配时的回退颜色，新 agent 不必每次补这里。 */
+export const AGENT_COLOR_FALLBACK = { bg: "bg-slate-400", dot: "bg-slate-400", text: "text-slate-500" };
+
+export function agentColor(id: string) {
+  return AGENT_COLORS[id] ?? AGENT_COLOR_FALLBACK;
+}
 
 export type ViewKey = "dashboard" | "market" | "skills" | "audit" | "presets" | "prompts" | "rules" | "mcp" | "plugins" | "hooks" | "agents" | "projects" | "settings" | "design";
 
@@ -382,6 +408,7 @@ export interface AgentRow {
   scan_agents_dir: boolean;
   enabled: boolean;
   sort_order: number;
+  capabilities: AgentCapabilities;
 }
 
 export interface ExtensionRow {

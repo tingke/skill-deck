@@ -146,6 +146,7 @@ pub fn get_runtimes(db: State<DbState>) -> Result<Vec<RuntimeInfo>, String> {
             mcp_config_file: a.mcp_config_file,
             enabled: a.enabled,
             sort_order: a.sort_order,
+            capabilities: a.capabilities,
         })
         .collect())
 }
@@ -981,11 +982,15 @@ pub fn save_prompt(
     let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".into());
     match id {
         Some(i) => {
-            conn.execute(
-                "UPDATE prompts SET title=?1, content=?2, tags=?3, updated_at=?4 WHERE id=?5",
-                params![title, content, tags_json, now_iso(), i],
-            )
-            .map_err(|e| e.to_string())?;
+            let updated = conn
+                .execute(
+                    "UPDATE prompts SET title=?1, content=?2, tags=?3, updated_at=?4 WHERE id=?5",
+                    params![title, content, tags_json, now_iso(), i],
+                )
+                .map_err(|e| e.to_string())?;
+            if updated == 0 {
+                return Err(format!("prompt {i} not found"));
+            }
             Ok(PromptRow {
                 id: i,
                 title,
@@ -1155,9 +1160,12 @@ pub fn apply_rule(db: State<DbState>, id: i64) -> Result<String, String> {
     let target = if !expanded.is_empty() {
         PathBuf::from(expanded)
     } else {
+        let rule_files = crate::agent_registry::rule_files_for(&platform);
+        let file_name = rule_files.first().copied().unwrap_or("CLAUDE.md");
         match platform.as_str() {
-            "codex" => home.join(".codex").join("AGENTS.md"),
-            _ => home.join(".claude").join("CLAUDE.md"),
+            "codex" => home.join(".codex").join(file_name),
+            "claude" => home.join(".claude").join(file_name),
+            _ => home.join(".claude").join(file_name),
         }
     };
     if let Some(parent) = target.parent() {
@@ -1225,11 +1233,7 @@ pub fn scan_rules(db: State<DbState>) -> Result<Vec<RuleRow>, String> {
     let mut new_count = 0i64;
     for agent in &agents {
         let config_path = PathBuf::from(expand_home(&agent.config_dir));
-        let files: Vec<&str> = match agent.id.as_str() {
-            "claude" => vec!["CLAUDE.md"],
-            "codex" => vec!["AGENTS.md"],
-            _ => vec!["CLAUDE.md", "AGENTS.md"],
-        };
+        let files: Vec<&str> = crate::agent_registry::rule_files_for(&agent.id).to_vec();
         for file_name in &files {
             let fp = config_path.join(file_name);
             if !fp.is_file() {
