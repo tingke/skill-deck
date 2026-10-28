@@ -28,6 +28,7 @@ import { parseSharedDisconnectError } from "../lib/connectionConfirmation";
 import {
   auditRiskRank,
   auditStats,
+  groupFindings,
   mergeFindings,
   ruleExplanation,
 } from "../lib/skillAudit";
@@ -292,11 +293,6 @@ export default function AuditView() {
         <div data-testid="safety-rows">
           <div className="flex items-center gap-2 mb-2">
             <SearchInput value={query} onChange={setQuery} placeholder={t("safety.searchPlaceholder")} />
-            {(filter === "all" || filter === "block") && stats.block > 0 && (
-              <button type="button" className="btn btn-ghost btn-sm text-red-500 hover:text-red-600 ml-auto" onClick={() => setFilter("block")}>
-                {t("safety.viewDanger")}
-              </button>
-            )}
           </div>
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-faint">
@@ -556,7 +552,9 @@ function SafetyDrawerBody({
         <div className="min-w-0">
           <div className={"text-xs font-semibold " + bannerTitleClass}>{bannerTitle}</div>
           {findings.length > 0 && (
-            <p className="text-2xs text-content leading-relaxed mt-1">{findings[0].message}</p>
+            <p className="text-2xs text-content leading-relaxed mt-1">
+              {ruleExplanation(findings[0].rule_id) ?? findings[0].message}
+            </p>
           )}
         </div>
       </div>
@@ -567,46 +565,70 @@ function SafetyDrawerBody({
             {t("safety.drawerFindings")}
           </div>
           <div className="space-y-2">
-            {findings.map((finding, index) => {
-              const key = `${finding.rule_id}-${index}`;
-              const open = expandedFindings[key];
-              const explanation = ruleExplanation(finding.rule_id);
+            {groupFindings(findings).map((group) => {
+              const open = expandedFindings[group.key];
+              const toneClass =
+                group.severity === "block"
+                  ? "text-red-600 dark:text-red-300"
+                  : group.severity === "warn"
+                    ? "text-amber-600 dark:text-amber-300"
+                    : "text-sky-600 dark:text-sky-300";
+              const explanations = [
+                ...new Set(
+                  group.rules.map((rule) => ruleExplanation(rule.rule_id) ?? rule.message),
+                ),
+              ];
               return (
-                <div key={key} className="rounded-lg border border-border-subtle bg-surface p-2.5">
+                <div key={group.key} className="rounded-lg border border-border-subtle bg-surface p-2.5">
                   <div className="flex items-start gap-2">
-                    {finding.severity === "block" ? (
+                    {group.severity === "block" ? (
                       <OctagonX size={13} className="text-red-500 shrink-0 mt-0.5" />
-                    ) : finding.severity === "warn" ? (
+                    ) : group.severity === "warn" ? (
                       <TriangleAlert size={13} className="text-amber-500 shrink-0 mt-0.5" />
                     ) : (
                       <Info size={13} className="text-sky-500 shrink-0 mt-0.5" />
                     )}
-                    <span className="text-xs text-content leading-relaxed flex-1">{finding.message}</span>
-                    {finding.count > 1 && (
-                      <span className="text-2xs text-faint shrink-0 mt-0.5">
-                        {t("safety.drawerFindingCount", { count: finding.count })}
-                      </span>
-                    )}
-                  </div>
-                  {(explanation || finding.locations.length > 0) && (
-                    <button
-                      type="button"
-                      className="flex items-center gap-1 text-2xs text-accent mt-1.5 ml-5"
-                      onClick={() => onToggleFinding(key)}
-                    >
-                      {t("market.dlgWhatMean")}
-                      {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                    </button>
-                  )}
-                  {open && (
-                    <div className="ml-5 mt-1.5 rounded bg-surface-2 p-2 text-2xs text-muted leading-relaxed">
-                      {explanation}
-                      <div className="text-faint font-mono mt-1 space-y-0.5">
-                        <div>{t("market.dlgRuleRef", { id: finding.rule_id })}</div>
-                        {finding.locations.map((location) => (
-                          <div key={location} className="truncate" title={location}>{location}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={"text-xs font-semibold leading-relaxed " + toneClass}>
+                          {group.title}
+                        </span>
+                        {group.count > 1 && (
+                          <span className="text-2xs text-faint">
+                            {t("safety.drawerFindingCount", { count: group.count })}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 space-y-0.5">
+                        {explanations.map((explanation) => (
+                          <p key={explanation} className="text-2xs text-muted leading-relaxed">
+                            {explanation}
+                          </p>
                         ))}
                       </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 text-2xs text-accent mt-1.5 ml-5"
+                    onClick={() => onToggleFinding(group.key)}
+                  >
+                    {t("safety.drawerDetailToggle")}
+                    {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                  </button>
+                  {open && (
+                    <div className="ml-5 mt-1.5 rounded bg-surface-2 p-2 text-2xs text-muted leading-relaxed space-y-1.5">
+                      {group.rules.map((rule, ruleIndex) => (
+                        <div key={`${rule.rule_id}-${ruleIndex}`}>
+                          <div>{rule.message}</div>
+                          <div className="text-faint font-mono mt-1 space-y-0.5">
+                            <div>{t("market.dlgRuleRef", { id: rule.rule_id })}</div>
+                            {rule.locations.map((location) => (
+                              <div key={location} className="truncate" title={location}>{location}</div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
