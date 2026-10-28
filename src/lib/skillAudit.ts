@@ -104,6 +104,8 @@ export const RULE_EXPLANATIONS: Record<string, string> = {
   "SEC-009": "包含压缩包，检查无法覆盖压缩包里面的内容，相当于有一部分没查。",
   "SEC-010": "有文件因权限问题无法读取，这次检查不完整。",
   "SEC-011": "包含无法识别格式的二进制内容，用途不明。",
+  "SEC-012": "既会读取你的密码、密钥等敏感文件，又会把数据发送到外部服务器——你的凭据可能被直接偷走。",
+  "SEC-013": "技能里的文件太多、太深或太大，这次体检没有全部检查完，结论可能不完整。",
 };
 
 export function ruleExplanation(ruleId: string): string | null {
@@ -121,8 +123,10 @@ export const RULE_GROUP_META: Record<string, { group: string; icon: "lock" | "fi
   "SEC-007": { group: "乱执行", icon: "terminal" },
   "SEC-011": { group: "乱执行", icon: "terminal" },
   "SEC-006": { group: "网络与诱导", icon: "globe" },
+  "SEC-012": { group: "网络与诱导", icon: "globe" },
   "SEC-009": { group: "没查全", icon: "package" },
   "SEC-010": { group: "没查全", icon: "package" },
+  "SEC-013": { group: "没查全", icon: "package" },
 };
 
 /** 安全体检列表排序：危险 → 需留意 → 未检查 → 安全 */
@@ -166,6 +170,41 @@ export function mergeFindings(findings: AuditFinding[]): MergedFinding[] {
   }
   const order: Record<AuditSeverity, number> = { block: 0, warn: 1, info: 2 };
   return [...merged.values()].sort((a, b) => order[a.severity] - order[b.severity]);
+}
+
+export interface GroupedFinding {
+  /** 分组键：白话分组名；未登记的规则退回 rule_id */
+  key: string;
+  /** 卡片标题：白话分组名（如「偷隐私」） */
+  title: string;
+  /** 组内最高严重级别 */
+  severity: AuditSeverity;
+  /** 组内全部命中次数 */
+  count: number;
+  /** 组内成员（已按规则 + 描述合并的发现），保持严重级别排序 */
+  rules: MergedFinding[];
+}
+
+/** 详情抽屉「发现了什么」按大类聚合：SEC-003/004/005 同属「乱执行」时合并为一张卡；组间按严重级别排序 */
+export function groupFindings(findings: MergedFinding[]): GroupedFinding[] {
+  const order: Record<AuditSeverity, number> = { block: 0, warn: 1, info: 2 };
+  const groups = new Map<string, GroupedFinding>();
+  for (const finding of findings) {
+    const meta = RULE_GROUP_META[finding.rule_id];
+    const key = meta?.group ?? finding.rule_id;
+    const title = meta?.group ?? finding.message;
+    let group = groups.get(key);
+    if (!group) {
+      group = { key, title, severity: finding.severity, count: 0, rules: [] };
+      groups.set(key, group);
+    }
+    if (order[finding.severity] < order[group.severity]) {
+      group.severity = finding.severity;
+    }
+    group.count += finding.count;
+    group.rules.push(finding);
+  }
+  return [...groups.values()].sort((a, b) => order[a.severity] - order[b.severity]);
 }
 
 /** 体检总分：已检查技能的平均分；一个都没查过时返回 null */

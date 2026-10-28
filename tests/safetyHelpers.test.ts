@@ -8,6 +8,7 @@ import {
   auditVerdictMeta,
   averageAuditScore,
   auditStats,
+  groupFindings,
   mergeFindings,
   ruleExplanation,
 } from "../src/lib/skillAudit";
@@ -76,4 +77,34 @@ test("mergeFindings dedupes identical checks and keeps all locations", () => {
   assert.equal(merged[1].count, 3);
   // 相同位置只保留一份
   assert.deepEqual(merged[1].locations, ["a.sh", "b.sh"]);
+});
+
+test("groupFindings merges same-category rules into one card ordered by severity", () => {
+  const merged = mergeFindings([
+    // 模拟后端输出顺序：按 rule_id 排序后同级别稳定
+    { rule_id: "SEC-001", severity: "block", message: "疑似读取凭据", location: "SKILL.md:1" },
+    { rule_id: "SEC-003", severity: "block", message: "下载内容直接管道执行", location: "a.sh:2" },
+    { rule_id: "SEC-004", severity: "warn", message: "疑似修改 shell 配置", location: "SKILL.md:1" },
+    { rule_id: "SEC-005", severity: "warn", message: "疑似混淆 / 运行时解码执行", location: "b.sh:3" },
+  ]);
+  const groups = groupFindings(merged);
+  // 四条规则聚成两类：偷隐私（SEC-001）+ 乱执行（SEC-003/004/005）
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].key, "偷隐私");
+  assert.equal(groups[0].severity, "block");
+  assert.equal(groups[0].count, 1);
+  assert.equal(groups[1].key, "乱执行");
+  assert.equal(groups[1].severity, "block");
+  assert.equal(groups[1].count, 3);
+  assert.deepEqual(
+    groups[1].rules.map((rule) => rule.rule_id),
+    ["SEC-003", "SEC-004", "SEC-005"],
+  );
+  // 未登记的规则按自身 rule_id 独立成组，标题退回技术 message
+  const unknown = groupFindings([
+    { rule_id: "SEC-999", severity: "warn", message: "未知规则", count: 1, locations: [] },
+  ]);
+  assert.equal(unknown.length, 1);
+  assert.equal(unknown[0].key, "SEC-999");
+  assert.equal(unknown[0].title, "未知规则");
 });
