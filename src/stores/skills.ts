@@ -38,6 +38,9 @@ interface SkillsState {
   loading: boolean;
   globalScanning: boolean;
   selectedSkillId: string | null;
+  /** 已检测出可更新的 skill id（跨视图保留，避免切页后角标丢失） */
+  updatableSkillIds: Set<string>;
+  setUpdatableSkillIds: (ids: Set<string>) => void;
   skillFiles: SkillFileEntry[];
   skillAudit: AuditReport | null;
   auditingSkill: boolean;
@@ -82,6 +85,8 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   loading: false,
   globalScanning: false,
   selectedSkillId: null,
+  updatableSkillIds: new Set<string>(),
+  setUpdatableSkillIds: (ids) => set({ updatableSkillIds: ids }),
   skillFiles: [],
   skillAudit: null,
   auditingSkill: false,

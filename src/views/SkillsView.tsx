@@ -208,7 +208,8 @@ export default function SkillsView() {
   const [viewMode, setViewMode] = useViewMode("skills");
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [checkingUpdates, setCheckingUpdates] = useState(false);
-  const [updatableIds, setUpdatableIds] = useState<Set<string>>(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
+  const { updatableSkillIds: updatableIds, setUpdatableSkillIds: setUpdatableIds } = useSkillsStore();
   const [installOpen, setInstallOpen] = useState(false);
   const tagClusters = useMemo(() => {
     const map = new Map<string, number>();
@@ -223,6 +224,17 @@ export default function SkillsView() {
     skills.forEach((s) => map.set(s.source_lib, (map.get(s.source_lib) || 0) + 1));
     return map;
   }, [skills]);
+
+  // 标签或库源被删除后，重置失效的筛选条件，避免列表持续为空
+  useEffect(() => {
+    if (railFilter.startsWith("tag:")) {
+      const tag = railFilter.slice(4);
+      if (!tagClusters.some(({ tag: t2 }) => t2 === tag)) setRailFilter(ALL);
+    } else if (railFilter.startsWith("lib:")) {
+      const lib = railFilter.slice(4);
+      if (!librarySources.some((l) => l.name === lib)) setRailFilter(ALL);
+    }
+  }, [railFilter, tagClusters, librarySources]);
 
   const filtered = useMemo(() => {
     let result = [...skills];
@@ -256,7 +268,8 @@ export default function SkillsView() {
 
   const batchToggleEnabled = async (enabled: boolean) => {
     const ids = Array.from(validCheckedIds);
-    if (ids.length === 0) return;
+    if (ids.length === 0 || batchBusy) return;
+    setBatchBusy(true);
     try {
       const failed = await batchToggleSkillEnabled(ids, enabled);
       await useSkillsStore.getState().loadSkills();
@@ -265,6 +278,10 @@ export default function SkillsView() {
           t(enabled ? "skills.detail.batchEnableFailed" : "skills.detail.batchDisableFailed", { count: failed.length }),
           "error",
         );
+      } else {
+        useToastStore.getState().show(
+          t(enabled ? "skills.detail.batchEnabled" : "skills.detail.batchDisabled", { count: ids.length }),
+        );
       }
     } catch (error) {
       console.error(error);
@@ -272,10 +289,10 @@ export default function SkillsView() {
         t(enabled ? "skills.detail.batchEnableFailed" : "skills.detail.batchDisableFailed", { count: ids.length }),
         "error",
       );
+    } finally {
+      setBatchBusy(false);
     }
   };
-
-  const railLabel = railFilter === ALL ? "全部" : `「${railFilter.slice(4)}」`;
 
   const checkAllUpdates = async () => {
     const ids = skills.filter((s) => s.origin_type).map((s) => s.id);
@@ -283,8 +300,7 @@ export default function SkillsView() {
     setCheckingUpdates(true);
     try {
       const list = await checkSkillUpdates(ids);
-      setUpdatableIds(new Set(list.filter((item) => item.has_update && !item.error).map((item) => item.skill_id)));
-      const count = list.filter((item) => item.has_update && !item.error).length;
+      setUpdatableIds(new Set(list.filter((item) => item.has_update && !item.error).map((item) => item.skill_id)));      const count = list.filter((item) => item.has_update && !item.error).length;
       useToastStore.getState().show(t("skills.detail.checkUpdatesAllDone", { count }));
     } catch (error) {
       console.error(error);
@@ -377,12 +393,14 @@ export default function SkillsView() {
               <div className="w-px h-4 bg-border-subtle" />
               <button
                 onClick={() => batchToggleEnabled(true)}
+                disabled={batchBusy}
                 className="btn btn-outline btn-sm text-emerald-500"
               >
                 <Power size={12} /> {t("skills.detail.batchEnable")}
               </button>
               <button
                 onClick={() => batchToggleEnabled(false)}
+                disabled={batchBusy}
                 className="btn btn-outline btn-sm text-faint"
               >
                 <Power size={12} /> {t("skills.detail.batchDisable")}
@@ -393,16 +411,21 @@ export default function SkillsView() {
                 onChange={async (e) => {
                   const agentId = e.target.value;
                   e.target.value = "";
-                  if (!agentId) return;
+                  if (!agentId || batchBusy) return;
+                  setBatchBusy(true);
                   const ids = Array.from(validCheckedIds);
                   try {
                     await batchConnect(ids, [], agentId);
+                    useToastStore.getState().show(t("skills.detail.batchConnected", { count: ids.length }));
                   } catch (error) {
                     console.error(error);
                     useToastStore.getState().show(t("skills.detail.batchConnectFailed"), "error");
+                  } finally {
+                    await useSkillsStore.getState().refreshAfterConnectionOp();
+                    setBatchBusy(false);
                   }
-                  await useSkillsStore.getState().refreshAfterConnectionOp();
                 }}
+                disabled={batchBusy}
                 className="btn btn-outline btn-sm pr-2"
               >
                 <option value="">{t("skills.detail.connectTo")}</option>
@@ -416,11 +439,13 @@ export default function SkillsView() {
                 onChange={async (e) => {
                   const agentId = e.target.value;
                   e.target.value = "";
-                  if (!agentId) return;
+                  if (!agentId || batchBusy) return;
+                  setBatchBusy(true);
 
                   const disconnectIds = getDisconnectableSkillIds(skills, validCheckedIds, agentId);
                   if (disconnectIds.length === 0) {
                     useToastStore.getState().show(t("skills.detail.batchNotConnected"), "error");
+                    setBatchBusy(false);
                     return;
                   }
 
@@ -449,8 +474,11 @@ export default function SkillsView() {
                     console.error(error);
                     useToastStore.getState().show(t("skills.detail.batchDisconnectFailed"), "error");
                     await useSkillsStore.getState().refreshAfterConnectionOp();
+                  } finally {
+                    setBatchBusy(false);
                   }
                 }}
+                disabled={batchBusy}
                 className="btn btn-outline btn-sm pr-2"
               >
                 <option value="">{t("skills.detail.disconnectFrom")}</option>
