@@ -118,11 +118,11 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     try {
       const skills = await api.scanAll(true);
       set({ skills, loading: false });
-      toast().show(`扫描完成，${skills.length} 个 skill`);
+      toast().show(tr("toast.scanDone", { count: skills.length }));
       refreshActivity();
     } catch {
       set({ loading: false });
-      toast().show("扫描失败", "error");
+      toast().show(tr("toast.scanFailed"), "error");
     }
   },
 
@@ -169,16 +169,21 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     await api.deleteSkill(skillId);
     set((state) => ({ skills: state.skills.filter((s) => s.id !== skillId) }));
     if (get().selectedSkillId === skillId) get().selectSkill(null);
-    toast().show("Skill 已删除");
+    toast().show(tr("toast.skillDeleted"));
     refreshActivity();
   },
 
   updateTags: async (skillId, tags) => {
-    await api.updateSkillTags(skillId, tags);
-    set((state) => ({
-      skills: state.skills.map((s) => (s.id === skillId ? { ...s, tags } : s)),
-    }));
-    toast().show("标签已更新");
+    try {
+      await api.updateSkillTags(skillId, tags);
+      set((state) => ({
+        skills: state.skills.map((s) => (s.id === skillId ? { ...s, tags } : s)),
+      }));
+      toast().show(tr("toast.tagsUpdated"));
+    } catch (error) {
+      console.error(error);
+      toast().show(tr("toast.tagsUpdateFailed"), "error");
+    }
   },
 
   toggleSkillEnabled: async (skillId, enabled) => {
@@ -197,13 +202,14 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     try { set({ agentOptions: await api.getAgentOptions() }); } catch { /* ignore */ }
   },
 
+  // 启动时的连接状态同步：校验 symlink 实际状态并回写 skills；
+  // 仅在 App 引导链调用，保持静默（同 bootstrapScan，不弹 toast）
   verifyConnections: async () => {
     try {
       const skills = await api.verifyConnections();
       set({ skills });
-      toast().show("已同步连接状态");
     } catch {
-      toast().show("同步失败", "error");
+      // 启动同步失败不打扰用户；连接类操作后的回刷走 refreshAfterConnectionOp
     }
   },
 
@@ -212,7 +218,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     const label = get().agentOptions.find((agent) => agent.id === agentId)?.label || agentId;
     try {
       if (state?.kind === "real_directory" || state?.kind === "real_file") {
-        toast().show("检测到真实入口，请先收纳到库源", "error");
+        toast().show(tr("toast.realEntryBlocked"), "error");
         return;
       }
       if (state?.kind === "symlink") {
@@ -231,14 +237,14 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
           });
           return;
         }
-        toast().show(`已断开 ${label}`, "info");
+        toast().show(tr("toast.disconnectedAgent", { label }), "info");
       } else {
         await api.connectSkill(skillId, agentId);
-        toast().show(`已连接到 ${label}`);
+        toast().show(tr("toast.connectedAgent", { label }));
       }
       await refreshAfterConnectionOp(skillId);
     } catch (e) {
-      toast().show("操作失败", "error");
+      toast().show(tr("toast.failed"), "error");
       console.error(e);
     }
   },
@@ -254,9 +260,9 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     try {
       await api.adoptRealEntry(skillId, agentId, librarySourceId);
       await refreshAfterConnectionOp(skillId);
-      toast().show("真实入口已移动到库源，并保留软链");
+      toast().show(tr("toast.adopted"));
     } catch (e) {
-      toast().show("收纳失败", "error");
+      toast().show(tr("toast.adoptFailed"), "error");
       console.error(e);
     }
   },
@@ -275,14 +281,21 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       if (pending.skillId) {
         await api.disconnectSkill(pending.skillId, pending.agentId, true);
         const label = get().agentOptions.find((agent) => agent.id === pending.agentId)?.label || pending.agentId;
-        toast().show(`已断开 ${label}`, "info");
+        toast().show(tr("toast.disconnectedAgent", { label }), "info");
       } else {
-        await api.batchConnect([], pending.skillIds, pending.agentId, true);
-        toast().show(`已断开 ${pending.skillIds.length} 个 Skill`, "info");
+        const failed = await api.batchConnect([], pending.skillIds, pending.agentId, true);
+        const okCount = pending.skillIds.length - failed.length;
+        if (failed.length === 0) {
+          toast().show(tr("skills.detail.batchDisconnected", { count: pending.skillIds.length }), "info");
+        } else if (okCount > 0) {
+          toast().show(tr("skills.detail.batchDisconnectPartial", { ok: okCount, failed: failed.length }), "info");
+        } else {
+          toast().show(tr("skills.detail.batchDisconnectFailed"), "error");
+        }
       }
       await refreshAfterConnectionOp();
     } catch (e) {
-      toast().show("操作失败", "error");
+      toast().show(tr("toast.failed"), "error");
       console.error(e);
     } finally {
       set({ connectionConfirmation: null, connectionConfirming: false });
@@ -312,7 +325,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     try {
       await get().deleteSkill(pending.id);
     } catch (e) {
-      toast().show("删除失败", "error");
+      toast().show(tr("toast.deleteFailed"), "error");
       console.error(e);
     } finally {
       set({ skillDeleteConfirmation: null, skillDeleting: false });
@@ -350,7 +363,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       }
       refreshActivity();
     } catch (e) {
-      toast().show("批量删除失败", "error");
+      toast().show(tr("toast.batchDeleteFailed"), "error");
       console.error(e);
     } finally {
       set({ batchDeleting: false });
@@ -396,14 +409,14 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
         ),
       }));
       toast().show(
-        report.verdict === "pass" ? "安全检查通过" : report.verdict === "warn" ? "安全检查：需留意" : "安全检查：发现危险",
+        report.verdict === "pass" ? tr("toast.auditPass") : report.verdict === "warn" ? tr("toast.auditWarn") : tr("toast.auditBlock"),
         report.verdict === "pass" ? "success" : "error",
       );
       refreshActivity();
     } catch (error) {
       set({ auditingSkill: false });
       console.error(error);
-      toast().show("安全检查失败", "error");
+      toast().show(tr("toast.auditFailed"), "error");
     }
   },
 }));

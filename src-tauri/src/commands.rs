@@ -132,21 +132,25 @@ pub fn get_runtimes(db: State<DbState>) -> Result<Vec<RuntimeInfo>, String> {
     let home = dirs::home_dir().ok_or("无法确定用户主目录")?;
     Ok(db_enabled_agents(&conn)
         .into_iter()
-        .map(|a| RuntimeInfo {
-            id: a.id,
-            label: a.label,
-            color: a.color,
-            default_dir: home
-                .join(&a.skills_dir)
-                .to_string_lossy()
-                .to_string(),
-            auto_scan: a.auto_scan,
-            scan_agents_dir: a.scan_agents_dir,
-            config_dir: a.config_dir,
-            mcp_config_file: a.mcp_config_file,
-            enabled: a.enabled,
-            sort_order: a.sort_order,
-            capabilities: a.capabilities,
+        .map(|a| {
+            let installed =
+                crate::agent_registry::agent_installed_at(&home, &a.skills_dir, &a.config_dir);
+            RuntimeInfo {
+                id: a.id,
+                label: a.label,
+                default_dir: home
+                    .join(&a.skills_dir)
+                    .to_string_lossy()
+                    .to_string(),
+                auto_scan: a.auto_scan,
+                scan_agents_dir: a.scan_agents_dir,
+                config_dir: a.config_dir,
+                mcp_config_file: a.mcp_config_file,
+                enabled: a.enabled,
+                sort_order: a.sort_order,
+                capabilities: a.capabilities,
+                installed,
+            }
         })
         .collect())
 }
@@ -223,6 +227,9 @@ pub(crate) fn runtime_skills_dir(runtime: &str, conn: &rusqlite::Connection) -> 
 pub fn scan_all(db: State<DbState>, log: Option<bool>) -> Result<Vec<SkillRow>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
+    // 每次扫描重跑 Agent 注册：本机新装的 Agent（目录出现）自动进入列表
+    crate::agent_registry::seed_agents(&conn);
+
     // 备份现有 path→tags，防止 skill id 变化时标签丢失
     let mut path_tags: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     if let Ok(mut stmt) =
@@ -277,6 +284,17 @@ pub fn scan_all(db: State<DbState>, log: Option<bool>) -> Result<Vec<SkillRow>, 
             &agent.label,
             &dir.to_string_lossy(),
         ));
+    }
+
+    // 扫描用户级共享目录 ~/.agents/skills：scan_agents_dir 的 Agent 额外读取的真实
+    // skill 在此注册并计入对应 Agent（项目级 .agents/skills 由 scan_project_skills 处理）。
+    if let Some(shared) = dirs::home_dir().map(|home| home.join(".agents").join("skills")) {
+        if shared.is_dir() {
+            found_ids.extend(scanner::scan_shared_agents_dir(
+                &conn,
+                &shared.to_string_lossy(),
+            ));
+        }
     }
 
     // 把备份的 tags 按 path 还原到新扫描出的 skill 行（应对 id 前缀变化的场景）
@@ -398,41 +416,65 @@ pub fn disconnect_skill(
     Ok(())
 }
 
-/// 批量接线/断开（用于预设切换）
-#[tauri::command]
+/// 批量接线/断开（用于预设切换）。
+/// 逐条尝试并收集失败的 skill_id 返回（不中断其余条目）；
+/// 断开遇到共享软链需要确认时（CONFIRM_SHARED）立即返回该错误，
+/// 由前端弹确认后带 confirmed_shared 重试，保持既有确认流程。
+#[tauri::command(async)]
 pub fn batch_connect(
     db: State<DbState>,
     connect_ids: Vec<String>,
     disconnect_ids: Vec<String>,
     agent_id: String,
     confirmed_shared: bool,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    batch_connect_impl(
+        &conn,
+        &connect_ids,
+        &disconnect_ids,
+        &agent_id,
+        confirmed_shared,
+    )
+}
 
-    for skill_id in &connect_ids {
-        skill_connections::connect_skill_connection(&conn, skill_id, &agent_id)?;
+fn batch_connect_impl(
+    conn: &rusqlite::Connection,
+    connect_ids: &[String],
+    disconnect_ids: &[String],
+    agent_id: &str,
+    confirmed_shared: bool,
+) -> Result<Vec<String>, String> {
+    let mut failed = Vec::new();
+    let mut connected = 0usize;
+
+    for skill_id in connect_ids {
+        match skill_connections::connect_skill_connection(conn, skill_id, agent_id) {
+            Ok(()) => connected += 1,
+            Err(_) => failed.push(skill_id.clone()),
+        }
     }
 
-    for skill_id in &disconnect_ids {
-        skill_connections::disconnect_skill_connection(
-            &conn,
-            skill_id,
-            &agent_id,
-            confirmed_shared,
-        )?;
+    let mut disconnected = 0usize;
+    for skill_id in disconnect_ids {
+        match skill_connections::disconnect_skill_connection(conn, skill_id, agent_id, confirmed_shared)
+        {
+            Ok(()) => disconnected += 1,
+            Err(error) => {
+                if error.starts_with("CONFIRM_SHARED:") {
+                    return Err(error);
+                }
+                failed.push(skill_id.clone());
+            }
+        }
     }
 
     log_activity(
-        &conn,
+        conn,
         "batch",
-        &format!(
-            "+{} -{} ({})",
-            connect_ids.len(),
-            disconnect_ids.len(),
-            agent_id
-        ),
+        &format!("+{} -{} ({})", connected, disconnected, agent_id),
     );
-    Ok(())
+    Ok(failed)
 }
 
 /// 获取最近活动日志
@@ -612,7 +654,7 @@ pub fn toggle_skill_enabled(
 
 /// 批量切换 skill 启用/停用：单条命令避免前端逐个 IPC 往返。
 /// 返回失败的 skill_id 列表（不存在的 id 或 manifest 重命名冲突）。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn batch_toggle_skill_enabled(
     db: State<DbState>,
     skill_ids: Vec<String>,
@@ -1399,8 +1441,8 @@ mod tests {
 
     fn add_skill_row(conn: &rusqlite::Connection, id: &str, path: &Path) {
         conn.execute(
-            "INSERT INTO skills (id, name, source_lib, path, created_at, updated_at)
-             VALUES (?1, ?1, 'lib', ?2, 'now', 'now')",
+            "INSERT INTO skills (id, name, source_lib, path, description, content_hash, created_at, updated_at)
+             VALUES (?1, ?1, 'lib', ?2, '', '', 'now', 'now')",
             params![id, path.to_string_lossy().to_string()],
         )
         .unwrap();
@@ -1460,5 +1502,115 @@ mod tests {
             .unwrap();
         assert_eq!(failed, vec!["bad".to_string()]);
         assert!(good.join("SKILL.md").is_file());
+    }
+
+    fn add_agent_row(conn: &rusqlite::Connection, id: &str, skills_dir: &Path, scan_agents_dir: bool) {
+        conn.execute(
+            "INSERT INTO agents (id, label, skills_dir, config_dir, mcp_config_file, color,
+                auto_scan, scan_agents_dir, enabled, sort_order, created_at, updated_at)
+             VALUES (?1, ?1, ?2, '', '', 'slate', 0, ?3, 1, 0, 'now', 'now')",
+            params![id, skills_dir.to_string_lossy().to_string(), scan_agents_dir as i32],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn batch_connect_collects_failures_and_applies_rest() {
+        let dir = TempDir::new("batch-connect");
+        let good = dir.0.join("good");
+        let agent_dir = dir.0.join("agent-skills");
+        std::fs::create_dir_all(&good).unwrap();
+        std::fs::write(good.join("SKILL.md"), "---\nname: good\n---\n").unwrap();
+        let conn = open_in_memory();
+        add_skill_row(&conn, "good", &good);
+        add_agent_row(&conn, "agent", &agent_dir, false);
+
+        let failed = batch_connect_impl(
+            &conn,
+            &["good".into(), "missing".into()],
+            &[],
+            "agent",
+            false,
+        )
+        .unwrap();
+        assert_eq!(failed, vec!["missing".to_string()]);
+
+        let link = agent_dir.join("good");
+        assert!(link.symlink_metadata().is_ok());
+        let linked: i64 = conn
+            .query_row(
+                "SELECT linked FROM connections WHERE skill_id='good' AND runtime='agent'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(linked, 1);
+    }
+
+    #[test]
+    fn batch_disconnect_collects_refused_real_entry_and_disconnects_rest() {
+        let dir = TempDir::new("batch-disconnect-real");
+        let library = dir.0.join("library");
+        let agent_dir = dir.0.join("agent-skills");
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::write(library.join("SKILL.md"), "---\nname: keep\n---\n").unwrap();
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::os::unix::fs::symlink(&library, agent_dir.join("keep")).unwrap();
+        let real = agent_dir.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("SKILL.md"), "real copy").unwrap();
+
+        let conn = open_in_memory();
+        add_skill_row(&conn, "keep", &library);
+        add_skill_row(&conn, "real", &real);
+        add_agent_row(&conn, "agent", &agent_dir, false);
+
+        let failed = batch_connect_impl(
+            &conn,
+            &[],
+            &["keep".into(), "real".into()],
+            "agent",
+            true,
+        )
+        .unwrap();
+        assert_eq!(failed, vec!["real".to_string()]);
+
+        assert!(!agent_dir.join("keep").symlink_metadata().is_ok());
+        assert!(real.join("SKILL.md").is_file());
+    }
+
+    #[test]
+    fn batch_disconnect_shared_symlink_requires_confirmation_and_stops() {
+        let dir = TempDir::new("batch-disconnect-shared");
+        let library = dir.0.join("library");
+        let private = dir.0.join("library-private");
+        let shared = dir.0.join("project").join(".agents").join("skills");
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::create_dir_all(&private).unwrap();
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::write(library.join("SKILL.md"), "---\nname: shared\n---\n").unwrap();
+        std::fs::write(private.join("SKILL.md"), "---\nname: private\n---\n").unwrap();
+        std::os::unix::fs::symlink(&library, shared.join("shared")).unwrap();
+        std::os::unix::fs::symlink(&private, shared.join("private")).unwrap();
+
+        let conn = open_in_memory();
+        add_skill_row(&conn, "lib:shared", &library);
+        add_skill_row(&conn, "lib:private", &private);
+        add_project(&conn, "project", "Project", &dir.0.join("project"));
+        add_agent_row(&conn, "first", &dir.0.join("first-skills"), true);
+        add_agent_row(&conn, "second", &dir.0.join("second-skills"), true);
+
+        let error = batch_connect_impl(
+            &conn,
+            &[],
+            &["lib:shared".into(), "lib:private".into()],
+            "first",
+            false,
+        )
+        .expect_err("shared disconnect must require confirmation");
+        assert!(error.starts_with("CONFIRM_SHARED:"));
+        // 立即中断：排在后面的 private 链接不能被顺带删掉
+        assert!(shared.join("private").symlink_metadata().is_ok());
+        assert!(shared.join("shared").symlink_metadata().is_ok());
     }
 }

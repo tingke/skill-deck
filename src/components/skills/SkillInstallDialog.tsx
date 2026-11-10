@@ -313,7 +313,9 @@ export default function SkillInstallDialog({
               <span className="text-2xs font-semibold text-faint uppercase tracking-wider">{t("market.dlgLocation")}</span>
               <select value={location} onChange={(event) => setLocation(event.target.value)} className="input">
                 <option value={LOCATION_LIBRARY}>
-                  {libraries[0] ? t("market.locationMainLibrary", { name: libraries[0].name }) : t("market.locationMainLibraryFallback")}
+                  {libraries.length > 1 && libraries[0]
+                    ? t("market.locationMainLibrary", { name: libraries[0].name })
+                    : t("market.locationMainLibraryFallback")}
                 </option>
                 {projects.length > 0 && (
                   <optgroup label={t("market.locationProjects")}>

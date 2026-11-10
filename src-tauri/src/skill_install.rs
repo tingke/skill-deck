@@ -7,6 +7,9 @@ use std::cell::RefCell;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+use std::thread;
 use tauri::State;
 use uuid::Uuid;
 
@@ -648,7 +651,7 @@ fn register_custom_skill(
 
 // ============ 更新 ============
 
-fn source_directory_hash(conn: &Connection, source: &SkillSourceInput) -> Result<String, String> {
+fn source_directory_hash(source: &SkillSourceInput, token: Option<&str>) -> Result<String, String> {
     if source.kind == "path" {
         let dir = resolve_path(&source.source_ref);
         if !dir.is_dir() {
@@ -659,66 +662,123 @@ fn source_directory_hash(conn: &Connection, source: &SkillSourceInput) -> Result
     let staging = StagingGuard::new("check");
     let fetch_dir = staging.0.join("fetch");
     fs::create_dir_all(&fetch_dir).map_err(|e| format!("创建暂存目录失败: {}", e))?;
-    fetch_source(source, &fetch_dir, github_token(conn).as_deref())?;
+    fetch_source(source, &fetch_dir, token)?;
     let root = locate_skill_root(&fetch_dir, source.subdir.as_deref())?;
     Ok(scanner::directory_hash(&root))
+}
+
+/// 单个 skill 的更新可用性检查：只做网络拉取/文件哈希，不访问数据库，
+/// 因此可以安全地在多个线程里并发执行（rusqlite Connection 非 Sync）。
+#[allow(clippy::too_many_arguments)]
+fn check_single_skill_update(
+    skill_id: &str,
+    name: &str,
+    path: &str,
+    origin_type: &str,
+    origin_ref: &str,
+    installed_hash: &str,
+    token: Option<&str>,
+) -> UpdateAvailability {
+    let source = source_from_origin(origin_type.to_string(), origin_ref.to_string());
+    let latest_hash = source_directory_hash(&source, token);
+    let local_hash = scanner::directory_hash(Path::new(path));
+
+    match latest_hash {
+        Ok(latest) => UpdateAvailability {
+            skill_id: skill_id.to_string(),
+            skill_name: name.to_string(),
+            has_update: latest != installed_hash,
+            local_changes: local_hash != installed_hash,
+            error: None,
+        },
+        Err(error) => UpdateAvailability {
+            skill_id: skill_id.to_string(),
+            skill_name: name.to_string(),
+            has_update: false,
+            local_changes: local_hash != installed_hash,
+            error: Some(error),
+        },
+    }
 }
 
 pub fn check_skill_updates_impl(
     conn: &Connection,
     skill_ids: &[String],
 ) -> Vec<UpdateAvailability> {
-    skill_ids
-        .iter()
-        .map(|skill_id| {
-            let row = conn.query_row(
-                "SELECT s.name, s.path, o.origin_type, o.origin_ref, o.installed_hash
-                 FROM skills s JOIN skill_origins o ON o.skill_id = s.id
-                 WHERE s.id = ?1",
-                params![skill_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                    ))
-                },
-            );
-            let (name, path, origin_type, origin_ref, installed_hash) = match row {
-                Ok(value) => value,
-                Err(_) => {
-                    return UpdateAvailability {
-                        skill_id: skill_id.clone(),
-                        skill_name: skill_id.clone(),
+    // 先在单线程里读完 DB（含 github token）：并发 worker 只做网络/哈希操作
+    let token = github_token(conn);
+    let mut origins: Vec<Option<(String, String, String, String, String, String)>> = Vec::new();
+    for skill_id in skill_ids {
+        let row = conn.query_row(
+            "SELECT s.name, s.path, o.origin_type, o.origin_ref, o.installed_hash
+             FROM skills s JOIN skill_origins o ON o.skill_id = s.id
+             WHERE s.id = ?1",
+            params![skill_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        );
+        origins.push(match row {
+            Ok((name, path, origin_type, origin_ref, installed_hash)) => {
+                Some((skill_id.clone(), name, path, origin_type, origin_ref, installed_hash))
+            }
+            Err(_) => None,
+        });
+    }
+
+    // 并行检查：git 来源每次都是全新 shallow clone，串行时随 skill 数线性变慢。
+    // 用固定 worker 池从共享索引取任务，结果按输入顺序回填。
+    const MAX_CONCURRENT_CHECKS: usize = 4;
+    let workers = origins.len().min(MAX_CONCURRENT_CHECKS).max(1);
+    let next_index = AtomicUsize::new(0);
+    let slots: Vec<Mutex<Option<UpdateAvailability>>> =
+        origins.iter().map(|_| Mutex::new(None)).collect();
+    thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                let index = next_index.fetch_add(1, Ordering::SeqCst);
+                let Some(entry) = origins.get(index) else {
+                    break;
+                };
+                let availability = match entry {
+                    Some((skill_id, name, path, origin_type, origin_ref, installed_hash)) => {
+                        check_single_skill_update(
+                            skill_id,
+                            name,
+                            path,
+                            origin_type,
+                            origin_ref,
+                            installed_hash,
+                            token.as_deref(),
+                        )
+                    }
+                    None => UpdateAvailability {
+                        skill_id: skill_ids[index].clone(),
+                        skill_name: skill_ids[index].clone(),
                         has_update: false,
                         local_changes: false,
                         error: Some("skill 不存在或未记录安装来源".to_string()),
-                    };
-                }
-            };
-
-            let source = source_from_origin(origin_type, origin_ref);
-            let latest_hash = source_directory_hash(conn, &source);
-            let local_hash = scanner::directory_hash(Path::new(&path));
-
-            match latest_hash {
-                Ok(latest) => UpdateAvailability {
-                    skill_id: skill_id.clone(),
-                    skill_name: name,
-                    has_update: latest != installed_hash,
-                    local_changes: local_hash != installed_hash,
-                    error: None,
-                },
-                Err(error) => UpdateAvailability {
-                    skill_id: skill_id.clone(),
-                    skill_name: name,
-                    has_update: false,
-                    local_changes: local_hash != installed_hash,
-                    error: Some(error),
-                },
-            }
+                    },
+                };
+                *slots[index]
+                    .lock()
+                    .expect("update check slot lock must not be poisoned")
+                = Some(availability);
+            });
+        }
+    });
+    slots
+        .into_iter()
+        .map(|slot| {
+            slot.into_inner()
+                .expect("update check slot lock must not be poisoned")
+                .expect("worker must fill every slot")
         })
         .collect()
 }
@@ -1350,6 +1410,72 @@ mod tests {
         let forced = update_skill_impl(&conn, "lib:demo", false, true).unwrap();
         assert_eq!(forced.status, "updated");
         assert!(!root.0.join("library/demo/local.txt").exists());
+    }
+
+    /// 并行检查更新：多 skill 时结果保持输入顺序，且各 skill 的
+    /// has_update / local_changes 互不干扰（本地改动不影响他项）。
+    #[test]
+    fn check_updates_parallel_preserves_order_and_flags() {
+        let root = temp_root();
+        let source_a = root.0.join("source/a");
+        let source_b = root.0.join("source/b");
+        let source_c = root.0.join("source/c");
+        write_skill(&source_a, "a1");
+        write_skill(&source_b, "b1");
+        write_skill(&source_c, "c1");
+        let library = root.0.join("library");
+        let conn = test_db(&library);
+
+        let path_input = |source: &Path| SkillSourceInput {
+            kind: "path".into(),
+            source_ref: source.to_string_lossy().to_string(),
+            subdir: None,
+        };
+        assert_eq!(
+            install_skill_impl(&conn, &path_input(&source_a), "lib", false).unwrap().status,
+            "installed"
+        );
+        assert_eq!(
+            install_skill_impl(&conn, &path_input(&source_b), "lib", false).unwrap().status,
+            "installed"
+        );
+        assert_eq!(
+            install_skill_impl(&conn, &path_input(&source_c), "lib", false).unwrap().status,
+            "installed"
+        );
+
+        // a：上游变了；b：无变化；c：本地变了 —— 超过 worker 数(1)时也至少 2 路并发
+        fs::write(
+            source_a.join("SKILL.md"),
+            "---\nname: a\nversion: 2.0.0\n---\nnew\n",
+        )
+        .unwrap();
+        fs::write(library.join("c/extra.txt"), "local change").unwrap();
+
+        let results = check_skill_updates_impl(
+            &conn,
+            &["lib:a".to_string(), "lib:b".to_string(), "lib:c".to_string()],
+        );
+        let ids: Vec<&str> = results.iter().map(|item| item.skill_id.as_str()).collect();
+        assert_eq!(ids, vec!["lib:a", "lib:b", "lib:c"]);
+
+        let a = &results[0];
+        assert!(a.has_update, "a should detect upstream update");
+        assert!(!a.local_changes);
+        let b = &results[1];
+        assert!(!b.has_update);
+        assert!(!b.local_changes, "untouched b must stay clean");
+        let c = &results[2];
+        assert!(!c.has_update);
+        assert!(c.local_changes, "c has local modifications");
+
+        // 不存在的 id：单条报错，不影响其余结果
+        let with_missing = check_skill_updates_impl(
+            &conn,
+            &["missing".to_string(), "lib:a".to_string()],
+        );
+        assert_eq!(with_missing[0].error.as_deref(), Some("skill 不存在或未记录安装来源"));
+        assert!(with_missing[1].has_update, "lib:a update must still be detected");
     }
 }
 

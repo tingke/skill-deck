@@ -39,6 +39,11 @@ export function SkillDetail() {
     skillFiles, toggleConnect, adoptRealEntry,
   } = useSkillsStore();
   const librarySources = useWorkspaceStore((s) => s.librarySources);
+  // 虚拟单库：业务界面不出现「库源」选择，只有多文件夹时才需要挑目标
+  const enabledLibraries = useMemo(
+    () => librarySources.filter((source) => source.enabled),
+    [librarySources],
+  );
   const [adoptionAgentId, setAdoptionAgentId] = useState<string | null>(null);
   const [adoptionSourceId, setAdoptionSourceId] = useState("");
   const [homeDirectory, setHomeDirectory] = useState("");
@@ -225,6 +230,13 @@ export function SkillDetail() {
                           {isReal && (
                             <button
                               onClick={() => {
+                                // 虚拟单库：单文件夹点击即收纳；多文件夹才展开选择目标
+                                if (enabledLibraries.length === 1) {
+                                  adoptRealEntry(skill.id, agent.id, enabledLibraries[0].id);
+                                  setAdoptionAgentId(null);
+                                  setAdoptionSourceId("");
+                                  return;
+                                }
                                 setAdoptionAgentId(adoptionAgentId === agent.id ? null : agent.id);
                                 setAdoptionSourceId("");
                               }}
@@ -248,7 +260,7 @@ export function SkillDetail() {
                             className="input w-auto min-w-[140px]"
                           >
                             <option value="">{t("skills.detail.adoptPickSource")}</option>
-                            {librarySources.filter((source) => source.enabled).map((source) => (
+                            {enabledLibraries.map((source) => (
                               <option key={source.id} value={source.id}>{source.name}</option>
                             ))}
                           </select>

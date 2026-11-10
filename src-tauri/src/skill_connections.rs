@@ -626,12 +626,12 @@ mod tests {
             skills_dir: skills_dir.to_string_lossy().to_string(),
             config_dir: String::new(),
             mcp_config_file: String::new(),
-            color: "slate".into(),
             auto_scan: false,
             scan_agents_dir: false,
             enabled: true,
             sort_order: 0,
             capabilities: crate::db::AgentCapabilities::default(),
+            installed: false,
         }
     }
 
@@ -796,12 +796,12 @@ mod tests {
             skills_dir: skills_dir.to_string_lossy().to_string(),
             config_dir: String::new(),
             mcp_config_file: String::new(),
-            color: "slate".into(),
             auto_scan: false,
             scan_agents_dir,
             enabled: true,
             sort_order: 0,
             capabilities: crate::db::AgentCapabilities::default(),
+            installed: false,
         }
     }
 

@@ -1,9 +1,11 @@
 import {
   siClaude,
   siCursor,
+  siDeepseek,
   siGithubcopilot,
   siGooglegemini,
   siOpencode,
+  siQwen,
   siTrae,
   siWindsurf,
 } from "simple-icons";
@@ -29,6 +31,8 @@ const BRAND_ICONS: Record<string, BrandIcon> = {
   windsurf: { path: siWindsurf.path, themeAware: true },
   opencode: { path: siOpencode.path, themeAware: true },
   copilot: { path: siGithubcopilot.path, themeAware: true },
+  qwen: { path: siQwen.path, color: `#${siQwen.hex}` },
+  dsh: { path: siDeepseek.path, color: `#${siDeepseek.hex}` },
 };
 
 export function AgentGlyph({

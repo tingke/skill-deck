@@ -3,10 +3,9 @@ import { useUiStore } from "../stores/ui";
 import { useSkillsStore } from "../stores/skills";
 import { useWorkspaceStore } from "../stores/workspace";
 import {
-  Search, Folder, Check, Trash2,
+  Search, Folder, Trash2,
   CheckSquare, Square, Power,
   FolderOpen, ChevronRight,
-  Cpu, FilePen, Globe,
   ExternalLink, RefreshCw, ArrowUp,
   Download,
 } from "lucide-react";
@@ -28,13 +27,6 @@ import { SkillDetail } from "../components/skills/SkillDetail";
 import SkillInstallDialog from "../components/skills/SkillInstallDialog";
 
 const ALL = "__all__";
-
-// ---- Permission icon mapping ----
-const PERM_ICONS: Record<string, { icon: typeof Cpu; label: string; color: string }> = {
-  "exec": { icon: Cpu, label: "可执行", color: "text-amber-500" },
-  "file:write": { icon: FilePen, label: "可写入", color: "text-blue-500" },
-  "network": { icon: Globe, label: "可联网", color: "text-accent" },
-};
 
 // ---- Audit verdict badge in table (dot + word, V6) ----
 function AuditBadge({ verdict }: { verdict?: string | null }) {
@@ -219,31 +211,25 @@ export default function SkillsView() {
       .map(([tag, count]) => ({ tag, count }));
   }, [skills]);
 
-  const libCounts = useMemo(() => {
-    const map = new Map<string, number>();
-    skills.forEach((s) => map.set(s.source_lib, (map.get(s.source_lib) || 0) + 1));
-    return map;
-  }, [skills]);
-
-  // 标签或库源被删除后，重置失效的筛选条件，避免列表持续为空
+  // 标签或智能体被删除后，重置失效的筛选条件，避免列表持续为空
   useEffect(() => {
     if (railFilter.startsWith("tag:")) {
       const tag = railFilter.slice(4);
       if (!tagClusters.some(({ tag: t2 }) => t2 === tag)) setRailFilter(ALL);
-    } else if (railFilter.startsWith("lib:")) {
-      const lib = railFilter.slice(4);
-      if (!librarySources.some((l) => l.name === lib)) setRailFilter(ALL);
+    } else if (railFilter.startsWith("agent:")) {
+      const agentId = railFilter.slice(6);
+      if (!agentOptions.some((a) => a.id === agentId)) setRailFilter(ALL);
     }
-  }, [railFilter, tagClusters, librarySources]);
+  }, [railFilter, tagClusters, agentOptions]);
 
   const filtered = useMemo(() => {
     let result = [...skills];
     if (railFilter.startsWith("tag:")) {
       const tag = railFilter.slice(4);
       result = result.filter((s) => s.tags.includes(tag));
-    } else if (railFilter.startsWith("lib:")) {
-      const lib = railFilter.slice(4);
-      result = result.filter((s) => s.source_lib === lib);
+    } else if (railFilter.startsWith("agent:")) {
+      const agentId = railFilter.slice(6);
+      result = result.filter((s) => s.links.includes(agentId));
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -300,8 +286,9 @@ export default function SkillsView() {
     setCheckingUpdates(true);
     try {
       const list = await checkSkillUpdates(ids);
-      setUpdatableIds(new Set(list.filter((item) => item.has_update && !item.error).map((item) => item.skill_id)));      const count = list.filter((item) => item.has_update && !item.error).length;
-      useToastStore.getState().show(t("skills.detail.checkUpdatesAllDone", { count }));
+      const updatable = list.filter((item) => item.has_update && !item.error);
+      setUpdatableIds(new Set(updatable.map((item) => item.skill_id)));
+      useToastStore.getState().show(t("skills.detail.checkUpdatesAllDone", { count: updatable.length }));
     } catch (error) {
       console.error(error);
       useToastStore.getState().show(t("skills.detail.checkUpdatesAllFailed"), "error");
@@ -338,16 +325,17 @@ export default function SkillsView() {
                 ))}
               </optgroup>
             )}
-            {librarySources.length > 0 && (
-              <optgroup label={t("skills.detail.libGroup")}>
-                {librarySources.map((lib) => (
-                  <option key={lib.id} value={`lib:${lib.name}`}>{lib.name} ({libCounts.get(lib.name) || 0})</option>
+            {agentOptions.length > 0 && (
+              <optgroup label={t("skills.detail.agentGroup")}>
+                {agentOptions.map((agent) => (
+                  <option key={agent.id} value={`agent:${agent.id}`}>{agent.label} ({skills.filter((s) => s.links.includes(agent.id)).length})</option>
                 ))}
               </optgroup>
             )}
           </select>
           <div className="flex-1 min-w-0" />
-          {skills.some((s) => s.origin_type) && (            <button
+          {skills.some((s) => s.origin_type) && (
+            <button
               onClick={checkAllUpdates}
               disabled={checkingUpdates}
               className="btn btn-outline btn-sm shrink-0"
@@ -415,8 +403,17 @@ export default function SkillsView() {
                   setBatchBusy(true);
                   const ids = Array.from(validCheckedIds);
                   try {
-                    await batchConnect(ids, [], agentId);
-                    useToastStore.getState().show(t("skills.detail.batchConnected", { count: ids.length }));
+                    const failed = await batchConnect(ids, [], agentId);
+                    const okCount = ids.length - failed.length;
+                    if (failed.length === 0) {
+                      useToastStore.getState().show(t("skills.detail.batchConnected", { count: ids.length }));
+                    } else if (okCount > 0) {
+                      useToastStore.getState().show(
+                        t("skills.detail.batchConnectPartial", { ok: okCount, failed: failed.length }),
+                      );
+                    } else {
+                      useToastStore.getState().show(t("skills.detail.batchConnectFailed"), "error");
+                    }
                   } catch (error) {
                     console.error(error);
                     useToastStore.getState().show(t("skills.detail.batchConnectFailed"), "error");
@@ -450,9 +447,18 @@ export default function SkillsView() {
                   }
 
                   try {
-                    await batchConnect([], disconnectIds, agentId);
+                    const failed = await batchConnect([], disconnectIds, agentId);
                     await useSkillsStore.getState().refreshAfterConnectionOp();
-                    useToastStore.getState().show(t("skills.detail.batchDisconnected", { count: disconnectIds.length }));
+                    const okCount = disconnectIds.length - failed.length;
+                    if (failed.length === 0) {
+                      useToastStore.getState().show(t("skills.detail.batchDisconnected", { count: disconnectIds.length }));
+                    } else if (okCount > 0) {
+                      useToastStore.getState().show(
+                        t("skills.detail.batchDisconnectPartial", { ok: okCount, failed: failed.length }),
+                      );
+                    } else {
+                      useToastStore.getState().show(t("skills.detail.batchDisconnectFailed"), "error");
+                    }
                   } catch (error) {
                     const confirmation = buildBatchSharedDisconnectConfirmation(
                       error,

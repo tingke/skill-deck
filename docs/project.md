@@ -90,7 +90,7 @@ src-tauri/src/
 > 定义：库源是 Skill 的唯一归属地和安装目标。Skill 的真实文件只存在于库源目录中，Agent skills 目录里只放指向库源的 symlink。
 
 - **身份**：skill id = `<库源id>:<相对路径>`，库源 id 是 skill 身份的一部分。
-- **扫描**：`scan_all` 递归扫描启用的库源（含隐藏目录、跟随 symlink、防 symlink 环），目录下所有带 `SKILL.md` 的子树都会登记为 skill。
+- **扫描**：`scan_all` 递归扫描启用的库源（含隐藏目录、跟随 symlink、防 symlink 环），目录下所有带 `SKILL.md` 的子树都会登记为 skill；同时扫描各启用 Agent 的全局 skills 目录与用户级共享目录 `~/.agents/skills`（后者只登记真实 skill 目录，id 前缀 `agents-shared:`，并为所有 `scan_agents_dir` 的 Agent 记 linked=1；项目级 `<project>/.agents/skills` 由项目扫描处理）。
 - **写入来源**：安装（Git/Zip/本地目录/市场）、`.ai-package` 导入、真实入口收纳（adopt）都只落入库源目录；同名目录冲突时不覆盖。
 - **删除语义**：删除库源只删数据库登记（skill 行、connections）和库源记录本身；磁盘文件保留，已连接 Agent 的软链会残留成为死链（删除时有确认提示）。
 

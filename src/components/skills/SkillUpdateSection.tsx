@@ -13,6 +13,19 @@ interface UpdateOptions {
   allowLocalChanges: boolean;
 }
 
+/** origin_ref 兼容两种形态：新 JSON {kind, source_ref, subdir} 与旧纯 URL/路径字符串 */
+function parseOriginMeta(raw: string): { main: string; subdir: string | null } {
+  try {
+    const parsed = JSON.parse(raw) as { kind?: string; source_ref?: string; subdir?: string | null };
+    if (parsed && typeof parsed.source_ref === "string" && parsed.source_ref.trim()) {
+      return { main: parsed.source_ref, subdir: parsed.subdir ?? null };
+    }
+  } catch {
+    // 旧格式：origin_ref 本身就是 URL / 路径
+  }
+  return { main: raw, subdir: null };
+}
+
 export function SkillUpdateSection({ skill, agentOptions }: { skill: Skill; agentOptions: AgentInfo[] }) {
   const t = useT();
   const [checking, setChecking] = useState(false);
@@ -70,6 +83,7 @@ export function SkillUpdateSection({ skill, agentOptions }: { skill: Skill; agen
 
   const affectedLabels = skill.links
     .map((agentId) => agentOptions.find((agent) => agent.id === agentId)?.label ?? agentId);
+  const originMeta = parseOriginMeta(skill.origin_ref ?? "");
 
   return (
     <div className="px-5 py-3 border-b border-border-subtle">
@@ -90,9 +104,17 @@ export function SkillUpdateSection({ skill, agentOptions }: { skill: Skill; agen
           <span className="text-2xs px-1.5 py-0.5 rounded bg-surface-2 text-muted font-medium shrink-0">
             {skill.origin_type === "git" ? t("skills.detail.originGit") : skill.origin_type === "archive" ? t("skills.detail.originZip") : t("skills.detail.originLocal")}
           </span>
-          <span className="text-2xs text-faint font-mono truncate min-w-0" title={skill.origin_ref ?? ""}>
-            {skill.origin_ref}
+          <span
+            className="text-2xs text-faint font-mono truncate min-w-0"
+            title={originMeta.subdir ? `${originMeta.main} · ${originMeta.subdir}` : originMeta.main}
+          >
+            {originMeta.main}
           </span>
+          {originMeta.subdir && (
+            <span className="text-2xs text-faint font-mono truncate min-w-0 opacity-70">
+              · {originMeta.subdir}
+            </span>
+          )}
         </div>
 
         {availability?.has_update && !confirming && (

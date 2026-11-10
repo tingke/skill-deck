@@ -331,6 +331,74 @@ pub fn scan_runtime_dir(conn: &Connection, id_prefix: &str, label: &str, source_
     found_ids
 }
 
+/// 扫描用户级共享目录 `~/.agents/skills`：只登记真实 skill 目录（symlink 是各 Agent
+/// 自己的连接入口，跳过），id = `agents-shared:<目录名>`，source_lib 固定 `.agents/skills`；
+/// 并为所有 `scan_agents_dir` 的 Agent 记 linked=1（共享目录对所有这类 Agent 直接可见）。
+/// 项目级 `<project>/.agents/skills` 由项目扫描处理，不在这里登记。
+pub fn scan_shared_agents_dir(conn: &Connection, shared_path: &str) -> Vec<String> {
+    let base = PathBuf::from(shared_path);
+    let mut found_ids = Vec::new();
+
+    let entries = match fs::read_dir(&base) {
+        Ok(e) => e,
+        Err(_) => return found_ids,
+    };
+
+    let linked_agents: Vec<crate::db::AgentRow> = db_enabled_agents(conn)
+        .into_iter()
+        .filter(|agent| agent.scan_agents_dir)
+        .collect();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // 只登记真实目录，跳过文件 / 隐藏目录 / symlink
+        if !path.is_dir() || path.is_symlink() {
+            continue;
+        }
+        let dir_name = path.file_name().unwrap().to_string_lossy().to_string();
+        if dir_name.starts_with('.') {
+            continue;
+        }
+
+        if let Some(scan) = scan_skill_dir(&path, ".agents/skills") {
+            let id = format!("agents-shared:{}", scan.original_dir);
+            found_ids.push(id.clone());
+            conn.execute(
+                "INSERT INTO skills (id, name, source_lib, path, description, content_hash, enabled, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT(id) DO UPDATE SET
+                   name=excluded.name, source_lib=excluded.source_lib, path=excluded.path,
+                   description=excluded.description, content_hash=excluded.content_hash, updated_at=excluded.updated_at",
+                params![
+                    id,
+                    scan.name,
+                    scan.source_lib,
+                    scan.path,
+                    scan.description,
+                    scan.content_hash,
+                    !scan.disabled as i32,
+                    now_iso(),
+                    now_iso(),
+                ],
+            )
+            .ok();
+
+            // 共享目录对所有 scan_agents_dir 的 Agent 直接可见：记 linked=1
+            for agent in &linked_agents {
+                conn.execute(
+                    "INSERT INTO connections (skill_id, runtime, linked, updated_at)
+                     VALUES (?1, ?2, 1, ?3)
+                     ON CONFLICT(skill_id, runtime) DO UPDATE SET linked = 1, updated_at = ?3",
+                    params![id, agent.id, now_iso()],
+                )
+                .ok();
+            }
+        }
+    }
+
+    found_ids
+}
+
 fn library_skill_identifier(base: &Path, skill_dir: &Path) -> Option<String> {
     let relative = skill_dir.strip_prefix(base).ok()?;
     let components: Vec<String> = relative
@@ -548,6 +616,105 @@ mod tests {
             .unwrap();
         assert_eq!(hidden_path, hidden.to_string_lossy().to_string());
     }
+
+    #[test]
+    fn shared_agents_scan_registers_real_dirs_and_links_scanning_agents() {
+        let root = TempDir(std::env::temp_dir().join(format!("skilldeck-shared-{}", Uuid::new_v4())));
+        fs::create_dir_all(&root.0).unwrap();
+
+        // 真实 skill 目录：登记，name 取 frontmatter
+        let skill_dir = root.0.join("user_ab5ae6ee__demo-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: demo-skill\ndescription: 测试共享目录\n---\nbody\n",
+        )
+        .unwrap();
+
+        // symlink 指向扫描根之外的其他 skill：属于 Agent 自己的连接入口，必须跳过
+        let outside = TempDir(std::env::temp_dir().join(format!("skilldeck-shared-out-{}", Uuid::new_v4())));
+        fs::create_dir_all(&outside.0).unwrap();
+        fs::write(outside.0.join("SKILL.md"), "---\nname: target\n---\n").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside.0, root.0.join("linked-skill")).unwrap();
+
+        // 隐藏目录跳过
+        let hidden = root.0.join(".hidden");
+        fs::create_dir_all(&hidden).unwrap();
+        fs::write(hidden.join("SKILL.md"), "---\nname: hidden\n---\n").unwrap();
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE skills (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, source_lib TEXT NOT NULL,
+                path TEXT NOT NULL, description TEXT, tags TEXT DEFAULT '[]',
+                content_hash TEXT, enabled INTEGER DEFAULT 1,
+                author TEXT DEFAULT '', license TEXT DEFAULT '', version TEXT DEFAULT '',
+                permissions TEXT DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE agents (
+                id TEXT PRIMARY KEY, label TEXT NOT NULL, skills_dir TEXT NOT NULL,
+                config_dir TEXT NOT NULL, mcp_config_file TEXT NOT NULL,
+                color TEXT NOT NULL, auto_scan INTEGER NOT NULL DEFAULT 0,
+                scan_agents_dir INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE connections (
+                skill_id TEXT NOT NULL, runtime TEXT NOT NULL, linked INTEGER DEFAULT 0,
+                symlink_path TEXT, updated_at TEXT NOT NULL,
+                PRIMARY KEY (skill_id, runtime)
+            );
+            "#,
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO agents (id, label, skills_dir, config_dir, mcp_config_file, color,
+                auto_scan, scan_agents_dir, enabled, sort_order, created_at, updated_at)
+             VALUES ('scanning', 'Scanning', '', '', '', 'slate', 0, 1, 1, 0, 'now', 'now'),
+                    ('private', 'Private', '', '', '', 'slate', 0, 0, 1, 1, 'now', 'now')",
+            [],
+        )
+        .unwrap();
+
+        let found = scan_shared_agents_dir(&conn, &root.0.to_string_lossy());
+
+        assert_eq!(found, vec!["agents-shared:user_ab5ae6ee__demo-skill".to_string()]);
+
+        let (name, source_lib, enabled): (String, String, i64) = conn
+            .query_row(
+                "SELECT name, source_lib, enabled FROM skills WHERE id = 'agents-shared:user_ab5ae6ee__demo-skill'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(name, "demo-skill");
+        assert_eq!(source_lib, ".agents/skills");
+        assert_eq!(enabled, 1);
+
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM skills", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(total, 1, "symlink and hidden dirs must not be registered");
+
+        let linked_scanning: i64 = conn
+            .query_row(
+                "SELECT linked FROM connections WHERE skill_id = 'agents-shared:user_ab5ae6ee__demo-skill' AND runtime = 'scanning'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(linked_scanning, 1);
+
+        let private_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM connections WHERE skill_id = 'agents-shared:user_ab5ae6ee__demo-skill' AND runtime = 'private'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(private_rows, 0, "non-scanning agents must not be linked");
+    }
 }
 
 /// 从数据库读取所有 skill 及其连接状态
@@ -613,3 +780,4 @@ pub fn get_all_skills(conn: &Connection) -> Vec<SkillRow> {
     .filter_map(|r| r.ok())
     .collect()
 }
+

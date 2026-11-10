@@ -30,6 +30,9 @@ import logoUrl from "./assets/logo.png";
 import type { ViewKey } from "./types";
 import { useT } from "./i18n";
 
+// 启动引导只执行一次（模块级标记：StrictMode 的重复挂载不会触发第二次）
+let bootstrapStarted = false;
+
 export default function App() {
   const { view, setView } = useUiStore();
   const loadSkills = useSkillsStore((s) => s.loadSkills);
@@ -73,6 +76,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // StrictMode 开发模式会把 effect 挂载两遍：启动引导只跑一次
+    if (bootstrapStarted) return;
+    bootstrapStarted = true;
     (async () => {
       await useSkillsStore.getState().bootstrapScan();
       await useSkillsStore.getState().loadAgentOptions();

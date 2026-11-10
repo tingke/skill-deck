@@ -292,6 +292,215 @@ pub const SPECS: &[AgentSpec] = &[
             builtin: true,
         },
     },
+    AgentSpec {
+        id: "dsh",
+        label: "DeepSeek Harness",
+        color: "blue",
+        skills_dir: ".dsh/skills",
+        config_dir: ".dsh",
+        // DSH 的 MCP 由 profile 内 cordis.patch.yml 的插件条目配置，
+        // 不是简单的 mcp.json 形态，因此 mcp 能力为 None；该文件名仅作定位提示。
+        mcp_config_file: "cordis.patch.yml",
+        sort_order: 8,
+        auto_scan: false,
+        scan_agents_dir: true,
+        seeded: true,
+        project_markers: &[".dsh"],
+        capabilities: Capabilities {
+            skills: true,
+            mcp: None,
+            hooks: None,
+            plugins: false,
+            rules: Some(&["AGENTS.md"]),
+            activity: false,
+            builtin: true,
+        },
+    },
+    AgentSpec {
+        id: "iflow",
+        label: "iFlow",
+        color: "cyan",
+        skills_dir: ".iflow/skills",
+        config_dir: ".iflow",
+        mcp_config_file: "mcp.json",
+        sort_order: 9,
+        auto_scan: false,
+        scan_agents_dir: false,
+        seeded: false,
+        project_markers: &[".iflow"],
+        capabilities: Capabilities {
+            skills: true,
+            mcp: Some(McpFormat::JsonServers),
+            hooks: None,
+            plugins: false,
+            rules: None,
+            activity: false,
+            builtin: true,
+        },
+    },
+    AgentSpec {
+        id: "qwen",
+        label: "Qwen Code",
+        color: "purple",
+        skills_dir: ".qwen/skills",
+        config_dir: ".qwen",
+        mcp_config_file: "settings.json",
+        sort_order: 10,
+        auto_scan: false,
+        scan_agents_dir: false,
+        seeded: false,
+        project_markers: &[".qwen", "QWEN.md"],
+        capabilities: Capabilities {
+            skills: true,
+            mcp: Some(McpFormat::JsonServers),
+            hooks: None,
+            plugins: false,
+            rules: Some(&["QWEN.md"]),
+            activity: false,
+            builtin: true,
+        },
+    },
+    AgentSpec {
+        id: "copilot",
+        label: "Copilot CLI",
+        color: "indigo",
+        skills_dir: ".copilot/skills",
+        config_dir: ".copilot",
+        mcp_config_file: "mcp-config.json",
+        sort_order: 11,
+        auto_scan: false,
+        scan_agents_dir: false,
+        seeded: false,
+        project_markers: &[".copilot", ".github"],
+        capabilities: Capabilities {
+            skills: true,
+            mcp: Some(McpFormat::JsonServers),
+            hooks: None,
+            plugins: false,
+            rules: Some(&["AGENTS.md"]),
+            activity: false,
+            builtin: true,
+        },
+    },
+    AgentSpec {
+        id: "zed",
+        label: "Zed",
+        color: "yellow",
+        // Zed 不使用 .zed/skills：个人技能目录就是共享的 ~/.agents/skills
+        // （见 zed.dev/docs/ai/skills），因此直接指向共享目录并开启 scan_agents_dir。
+        skills_dir: ".agents/skills",
+        config_dir: ".zed",
+        mcp_config_file: "settings.json",
+        sort_order: 12,
+        auto_scan: false,
+        scan_agents_dir: true,
+        seeded: false,
+        project_markers: &[".zed", ".rules"],
+        capabilities: Capabilities {
+            skills: true,
+            // Zed 的 MCP 是 settings.json 内 context_servers 形态，与 mcpServers 不同，暂不写入
+            mcp: None,
+            hooks: None,
+            plugins: false,
+            rules: Some(&[".rules"]),
+            activity: false,
+            builtin: true,
+        },
+    },
+    AgentSpec {
+        id: "zcode",
+        label: "ZCode",
+        color: "emerald",
+        skills_dir: ".zcode/skills",
+        config_dir: ".zcode",
+        mcp_config_file: "mcp.json",
+        sort_order: 13,
+        auto_scan: false,
+        scan_agents_dir: false,
+        seeded: false,
+        project_markers: &[".zcode"],
+        capabilities: Capabilities {
+            skills: true,
+            mcp: None,
+            hooks: None,
+            plugins: true,
+            rules: Some(&["AGENTS.md"]),
+            activity: false,
+            builtin: true,
+        },
+    },
+    AgentSpec {
+        id: "qoder",
+        label: "Qoder",
+        color: "amber",
+        // Qoder 与 Zed 一样发现共享的 ~/.agents/skills（docs.qoder.cn/qoder/skills），
+        // 自身配置在 ~/.qoder；检测只认配置目录。
+        skills_dir: ".agents/skills",
+        config_dir: ".qoder",
+        mcp_config_file: "mcp.json",
+        sort_order: 14,
+        auto_scan: false,
+        scan_agents_dir: true,
+        seeded: false,
+        project_markers: &[".qoder"],
+        capabilities: Capabilities {
+            skills: true,
+            mcp: None,
+            hooks: None,
+            plugins: false,
+            rules: None,
+            activity: false,
+            builtin: true,
+        },
+    },
+    AgentSpec {
+        id: "codebuddy",
+        label: "CodeBuddy",
+        color: "teal",
+        // skills 目录按社区惯例 .codebuddy/skills（官方文档未能验证），检测只认 .codebuddy。
+        skills_dir: ".codebuddy/skills",
+        config_dir: ".codebuddy",
+        mcp_config_file: "mcp.json",
+        sort_order: 15,
+        auto_scan: false,
+        scan_agents_dir: false,
+        seeded: false,
+        project_markers: &[".codebuddy"],
+        capabilities: Capabilities {
+            skills: true,
+            mcp: None,
+            hooks: None,
+            plugins: false,
+            rules: None,
+            activity: false,
+            builtin: true,
+        },
+    },
+    AgentSpec {
+        id: "antigravity",
+        label: "Antigravity",
+        color: "blue",
+        // Antigravity 无 .antigravity 目录：App 个人自定义在 ~/.gemini/config（含 skills/），
+        // CLI 另读 ~/.gemini/skills（antigravity.google/docs/customization-discovery）。
+        // 接线写 ~/.gemini/skills（CLI 读取），检测只认 ~/.gemini/config。
+        skills_dir: ".gemini/skills",
+        config_dir: ".gemini/config",
+        mcp_config_file: "mcp_config.json",
+        sort_order: 16,
+        auto_scan: false,
+        scan_agents_dir: false,
+        seeded: false,
+        project_markers: &[".agents", "GEMINI.md"],
+        capabilities: Capabilities {
+            skills: true,
+            mcp: None,
+            hooks: None,
+            plugins: true,
+            rules: Some(&["AGENTS.md", "GEMINI.md"]),
+            activity: false,
+            builtin: true,
+        },
+    },
 ];
 
 pub fn spec_by_id(id: &str) -> Option<&'static AgentSpec> {
@@ -308,12 +517,45 @@ pub fn rule_files_for(agent_id: &str) -> &'static [&'static str] {
     }
 }
 
-/// 将 `seeded: true` 的 spec 增量写入 agents 表。
+/// 本机安装检测：以 Agent 自己的配置目录为安装证据。
+/// 注意 skills_dir 不能作为检测依据——多个 Agent 共享 `~/.agents/skills`
+/// （Zed/Qoder/Antigravity 等），该目录存在不代表这些 Agent 已安装。
+/// 未安装的 Agent 不默认注册，界面保持干净（HarnessKit 式行为）。
+pub fn detect_installed_at(home: &std::path::Path, spec: &AgentSpec) -> bool {
+    agent_installed_at(home, spec.skills_dir, spec.config_dir)
+}
+
+/// 按 Agent 行的路径检测本机安装（对用户自建的 Agent 同样适用）。
+/// config_dir 非空时只看 config_dir；为空才回退到 skills_dir。
+pub fn agent_installed_at(home: &std::path::Path, skills_dir: &str, config_dir: &str) -> bool {
+    if !config_dir.is_empty() {
+        return home.join(config_dir).is_dir();
+    }
+    !skills_dir.is_empty() && home.join(skills_dir).is_dir()
+}
+
+/// 将 spec 增量写入 agents 表。
 ///
 /// 与旧逻辑（表空才 seed）不同：按 id upsert，新版本新增的内置 Agent 会
 /// 自动补进老用户数据库；已存在的行不会被覆盖（保留用户改动）。
+///
+/// 注册范围 = `seeded: true` 的核心 Agent + 本机检测到已安装的 Agent；
+/// 每次扫描重跑，用户新装某个 Agent 后下一次扫描即自动出现。
 pub fn seed_agents(conn: &rusqlite::Connection) {
-    for spec in SPECS.iter().filter(|spec| spec.seeded) {
+    let home = dirs::home_dir();
+    seed_agents_at(home.as_deref(), conn);
+}
+
+pub(crate) fn seed_agents_at(home: Option<&std::path::Path>, conn: &rusqlite::Connection) {
+    for spec in SPECS
+        .iter()
+        .filter(|spec| {
+            spec.seeded
+                || home
+                    .map(|home| detect_installed_at(home, spec))
+                    .unwrap_or(false)
+        })
+    {
         conn.execute(
             "INSERT INTO agents (id, label, skills_dir, config_dir, mcp_config_file, color,
                 auto_scan, scan_agents_dir, enabled, sort_order, created_at, updated_at)
@@ -339,6 +581,77 @@ pub fn seed_agents(conn: &rusqlite::Connection) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detect_installed_requires_either_dir_under_home() {
+        let home = std::env::temp_dir().join(format!("skilldeck-agents-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".iflow/skills")).unwrap();
+
+        let spec = spec_by_id("iflow").unwrap();
+        assert!(detect_installed_at(&home, spec), "skills dir present → installed");
+
+        let gemini = spec_by_id("gemini").unwrap();
+        assert!(!detect_installed_at(&home, gemini), "nothing present → not installed");
+
+        // 只有 config 目录也算安装
+        std::fs::create_dir_all(home.join(".gemini")).unwrap();
+        assert!(detect_installed_at(&home, gemini), "config dir present → installed");
+
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn shared_skills_dir_does_not_imply_zed_installed() {
+        // 回归：Zed 与其他 Agent 共享 ~/.agents/skills，
+        // 共享目录存在不能作为 Zed 已安装的证据（只认 .zed）。
+        let home = std::env::temp_dir().join(format!("skilldeck-agents-zed-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".agents/skills")).unwrap();
+
+        let zed = spec_by_id("zed").unwrap();
+        assert!(!detect_installed_at(&home, zed), "shared dir must not count as zed installed");
+
+        std::fs::create_dir_all(home.join(".zed")).unwrap();
+        assert!(detect_installed_at(&home, zed), ".zed present → installed");
+
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn seed_registers_core_and_detected_agents_only() {
+        let home = std::env::temp_dir().join(format!("skilldeck-agents-seed-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".qwen")).unwrap();
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE agents (
+                id TEXT PRIMARY KEY, label TEXT NOT NULL, skills_dir TEXT NOT NULL,
+                config_dir TEXT NOT NULL, mcp_config_file TEXT NOT NULL,
+                color TEXT NOT NULL, auto_scan INTEGER NOT NULL DEFAULT 0,
+                scan_agents_dir INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+
+        seed_agents_at(Some(&home), &conn);
+
+        let ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT id FROM agents ORDER BY sort_order").unwrap();
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0)).unwrap();
+            rows.flatten().collect()
+        };
+        // 核心 Agent（seeded: true）始终注册
+        for core in ["claude", "codex", "trae", "workbuddy", "dsh"] {
+            assert!(ids.iter().any(|id| id == core), "core {core} must be seeded");
+        }
+        // 本机检测到 .qwen → 注册；没装的（cursor/windsurf/zed/iflow…）不注册
+        assert!(ids.iter().any(|id| id == "qwen"), "detected qwen must be seeded");
+        assert!(!ids.iter().any(|id| id == "cursor"), "undetected cursor must not be seeded");
+        assert!(!ids.iter().any(|id| id == "windsurf"), "undetected windsurf must not be seeded");
+        assert!(!ids.iter().any(|id| id == "zed"), "zed must not be seeded without .zed dir");
+
+        std::fs::remove_dir_all(&home).unwrap();
+    }
 
     #[test]
     fn capabilities_json_round_trip_fields() {
@@ -367,6 +680,33 @@ mod tests {
         assert_eq!(rule_files_for("claude"), &["CLAUDE.md"]);
         assert_eq!(rule_files_for("cursor"), &[".cursorrules"]);
         assert_eq!(rule_files_for("unknown-agent"), FALLBACK_RULE_FILES);
+    }
+
+    #[test]
+    fn dsh_spec_matches_deepseek_harness_layout() {
+        let spec = spec_by_id("dsh").expect("dsh spec must exist");
+        assert_eq!(spec.label, "DeepSeek Harness");
+        assert_eq!(spec.skills_dir, ".dsh/skills");
+        assert_eq!(spec.config_dir, ".dsh");
+        // seeded: true → 老库通过 seed_agents 增量补齐
+        assert!(spec.seeded);
+        // DSH 同时读取 <project>/.dsh/skills 与 <project>/.agents/skills（用户级同理）
+        assert!(spec.scan_agents_dir);
+        assert_eq!(spec.project_markers, &[".dsh"]);
+        // 规则文件：DSH 读取 AGENTS.md/CLAUDE.md 指令文件链，AGENTS.md 是主名
+        assert_eq!(rule_files_for("dsh"), &["AGENTS.md"]);
+        // MCP 由 cordis.patch.yml 插件条目配置，非简单文件形态，SkillDeck 不代管
+        assert!(spec.capabilities.mcp.is_none());
+        assert!(spec.capabilities.hooks.is_none());
+        assert!(!spec.capabilities.plugins);
+        assert!(!spec.capabilities.activity);
+        assert!(spec.capabilities.skills);
+        assert!(spec.capabilities.builtin);
+        // capabilities_json 序列化保持 mcp/hooks 为空
+        let json = spec.capabilities_json();
+        assert!(json.contains("\"mcp\":null"));
+        assert!(json.contains("\"hooks\":false"));
+        assert!(json.contains("\"rules\":[\"AGENTS.md\"]"));
     }
 
     #[test]

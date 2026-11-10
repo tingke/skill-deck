@@ -34,20 +34,6 @@ function relativeToHome(abs: string, home = "") {
   return abs.startsWith(h) ? abs.slice(h.length) : abs;
 }
 
-const COLOR_MAP: Record<string, { dot: string; text: string; border: string }> = {
-  orange: { dot: "bg-orange-500", text: "text-orange-600", border: "border-orange-300" },
-  green: { dot: "bg-green-500", text: "text-green-600", border: "border-green-300" },
-  blue: { dot: "bg-sky-500", text: "text-sky-600", border: "border-sky-300" },
-  violet: { dot: "bg-violet-500", text: "text-violet-600", border: "border-violet-300" },
-  slate: { dot: "bg-muted", text: "text-muted", border: "border-border-strong" },
-  red: { dot: "bg-red-500", text: "text-red-600", border: "border-red-300" },
-  amber: { dot: "bg-amber-500", text: "text-amber-600", border: "border-amber-300" },
-  cyan: { dot: "bg-cyan-500", text: "text-cyan-600", border: "border-cyan-300" },
-};
-
-function colorOf(c: string) {
-  return COLOR_MAP[c] || COLOR_MAP.slate;
-}
 
 export default function AgentsView() {
   const t = useT();
@@ -63,10 +49,13 @@ export default function AgentsView() {
   const detailAgent = detailId ? agents.find((a) => a.id === detailId) ?? null : null;
   const filteredAgents = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return agents;
-    return agents.filter(
-      (a) => a.label.toLowerCase().includes(q) || a.id.toLowerCase().includes(q),
-    );
+    const matched = !q
+      ? agents
+      : agents.filter(
+          (a) => a.label.toLowerCase().includes(q) || a.id.toLowerCase().includes(q),
+        );
+    // 本机已安装优先展示，未安装的沉底（组内保持原排序）
+    return [...matched].sort((a, b) => Number(b.installed) - Number(a.installed));
   }, [agents, query]);
 
   const handleToggle = async (agent: AgentRow) => {
@@ -147,6 +136,9 @@ export default function AgentsView() {
                 <span className={`badge shrink-0 font-medium ${a.enabled ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400" : "text-faint bg-surface-2"}`}>
                   {a.enabled ? t("common.enabled") : t("common.disabled")}
                 </span>
+                {!a.installed && (
+                  <span className="badge shrink-0 bg-surface-2 text-faint">{t("agents.notInstalled")}</span>
+                )}
                 <ChevronRight size={14} className="list-row__chev" />
               </div>
             ))}
@@ -154,7 +146,6 @@ export default function AgentsView() {
         ) : (
         <div className="px-6 pb-6 card-grid">
           {filteredAgents.map((a) => {
-            const c = colorOf(a.color);
             return (
               <div
                 key={a.id}
@@ -179,6 +170,9 @@ export default function AgentsView() {
                   <span className={`badge shrink-0 font-medium ${a.enabled ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400" : "text-faint bg-surface-2"}`}>
                     {a.enabled ? t("common.enabled") : t("common.disabled")}
                   </span>
+                  {!a.installed && (
+                    <span className="badge shrink-0 bg-surface-2 text-faint">{t("agents.notInstalled")}</span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-1.5 mt-3 flex-wrap">
@@ -188,7 +182,7 @@ export default function AgentsView() {
                     { key: "plugins", count: countExt(a.id, "plugin"), show: a.capabilities.plugins, hot: countExt(a.id, "plugin") > 0 },
                     { key: "hooks", count: countExt(a.id, "hook"), show: a.capabilities.hooks, hot: countExt(a.id, "hook") > 0 },
                   ].filter((s) => s.show).map((s) => (
-                    <span key={s.key} className={`badge tnum ${s.hot ? `bg-accent-soft ${c.text}` : "bg-surface-2 text-faint"}`}>
+                    <span key={s.key} className={`badge tnum ${s.hot ? "bg-accent-soft text-accent" : "bg-surface-2 text-faint"}`}>
                       {s.count} {s.key}
                     </span>
                   ))}
@@ -351,7 +345,6 @@ function AgentEditor({
   const [skillsDir, setSkillsDir] = useState(editing?.skills_dir || "");
   const [configDir, setConfigDir] = useState(editing?.config_dir || "");
   const [mcpFile, setMcpFile] = useState(editing?.mcp_config_file || "");
-  const [color, setColor] = useState(editing?.color || "slate");
  const [autoScan, setAutoScan] = useState(editing?.auto_scan || false);
  const [scanAgentsDir, setScanAgentsDir] = useState(editing?.scan_agents_dir || false);
  const [sortOrder, setSortOrder] = useState(editing?.sort_order ?? 99);
@@ -389,20 +382,21 @@ function AgentEditor({
       skills_dir: skillsDir.trim(),
       config_dir: configDir.trim() || skillsDir.trim(),
       mcp_config_file: mcpFile.trim(),
-     color,
-     auto_scan: autoScan,
-     scan_agents_dir: scanAgentsDir,
-     enabled,
-     sort_order: sortOrder,
-     capabilities: editing?.capabilities ?? {
-       skills: true,
-       mcp: mcpFile.trim() ? "json_servers" : null,
-       hooks: false,
-       plugins: false,
-       rules: null,
-       activity: false,
-       builtin: false,
-     },
+      auto_scan: autoScan,
+      scan_agents_dir: scanAgentsDir,
+      enabled,
+      sort_order: sortOrder,
+      // 新登记的 Agent 由后端按本机目录重新检测；这里先给真值避免闪烁
+      installed: true,
+      capabilities: editing?.capabilities ?? {
+        skills: true,
+        mcp: mcpFile.trim() ? "json_servers" : null,
+        hooks: false,
+        plugins: false,
+        rules: null,
+        activity: false,
+        builtin: false,
+      },
     };
     try {
       await saveAgent(agent);
@@ -504,22 +498,7 @@ function AgentEditor({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 items-start">
-            <div>
-              <label className="text-[13px] text-faint mb-1 block">{t("common.color")}</label>
-              <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                {Object.entries(COLOR_MAP).map(([name, c]) => (
-                  <button
-                    key={name}
-                    onClick={() => setColor(name)}
-                    className={`w-6 h-6 rounded-full border-2 transition-transform ${
-                      color === name ? "scale-110 ring-2 ring-offset-1 dark:ring-offset-surface ring-border-strong" : "border-transparent"
-                    } ${c.dot}`}
-                    title={name}
-                  />
-                ))}
-              </div>
-            </div>
+          <div className="space-y-3">
             <div>
               <label className="text-[13px] text-faint mb-1 block">{t("common.sortOrder")}</label>
               <input

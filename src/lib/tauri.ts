@@ -32,7 +32,7 @@ export const batchConnect = (
   disconnectIds: string[],
   agentId: string,
   confirmedShared = false,
-) => invoke("batch_connect", { connectIds, disconnectIds, agentId, confirmedShared });
+) => invoke<string[]>("batch_connect", { connectIds, disconnectIds, agentId, confirmedShared });
 
 export const getSkillConnections = (skillId: string) =>
   invoke<SkillConnectionState[]>("get_skill_connections", { skillId });

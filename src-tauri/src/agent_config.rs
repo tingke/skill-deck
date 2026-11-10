@@ -103,12 +103,12 @@ pub fn mcp_target_by_id(agent_id: &str) -> Result<McpTarget, String> {
         skills_dir: spec.skills_dir.to_string(),
         config_dir: spec.config_dir.to_string(),
         mcp_config_file: spec.mcp_config_file.to_string(),
-        color: spec.color.to_string(),
         auto_scan: spec.auto_scan,
         scan_agents_dir: spec.scan_agents_dir,
         enabled: true,
         sort_order: spec.sort_order,
         capabilities: crate::db::AgentCapabilities::for_agent(agent_id),
+        installed: true,
     };
     mcp_target_for_agent(&agent, &home)
 }
@@ -425,12 +425,12 @@ mod tests {
             skills_dir: format!(".{}/skills", id),
             config_dir: config_dir.to_string(),
             mcp_config_file: mcp_file.to_string(),
-            color: "slate".to_string(),
             auto_scan: false,
             scan_agents_dir: false,
             enabled: true,
             sort_order: 0,
             capabilities: crate::db::AgentCapabilities::for_agent(id),
+            installed: false,
         }
     }
 

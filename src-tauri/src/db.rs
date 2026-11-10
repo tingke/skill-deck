@@ -538,14 +538,16 @@ mod migration_tests {
         let conn = Connection::open_in_memory().unwrap();
         migrate(&conn);
 
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM agents", [], |row| row.get(0))
-            .unwrap();
-        let seeded = crate::agent_registry::SPECS
-            .iter()
-            .filter(|spec| spec.seeded)
-            .count() as i64;
-        assert_eq!(count, seeded);
+        let ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT id FROM agents").unwrap();
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0)).unwrap();
+            rows.flatten().collect()
+        };
+        // 核心 Agent 必然在册；检测到本机安装的其他 Agent 可能有额外注册，
+        // 因此断言包含关系而非精确数量（不依赖宿主机 HOME 状态）。
+        for core in ["claude", "codex", "trae", "workbuddy", "dsh"] {
+            assert!(ids.iter().any(|id| id == core), "core agent {core} must be seeded");
+        }
     }
 
     #[test]
@@ -586,15 +588,15 @@ mod migration_tests {
         assert_eq!(skills_dir, ".custom/skills");
         assert_eq!(sort_order, 99);
 
-        // 其余 seeded agent 仍被补齐
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM agents", [], |row| row.get(0))
-            .unwrap();
-        let seeded = crate::agent_registry::SPECS
-            .iter()
-            .filter(|spec| spec.seeded)
-            .count() as i64;
-        assert_eq!(count, seeded);
+        // 其余核心 seeded agent 仍被补齐（检测注册的 Agent 可能有额外行，不断言精确数量）
+        let ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT id FROM agents").unwrap();
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0)).unwrap();
+            rows.flatten().collect()
+        };
+        for core in ["codex", "trae", "workbuddy", "dsh"] {
+            assert!(ids.iter().any(|id| id == core), "core agent {core} must be seeded");
+        }
     }
 
     #[test]
@@ -770,7 +772,6 @@ pub struct RuleRow {
 pub struct RuntimeInfo {
     pub id: String,
     pub label: String,
-    pub color: String,
     pub default_dir: String,
     pub auto_scan: bool,
     pub scan_agents_dir: bool,
@@ -779,6 +780,8 @@ pub struct RuntimeInfo {
     pub enabled: bool,
     pub sort_order: i64,
     pub capabilities: AgentCapabilities,
+    /// 本机检测：skills/config 目录存在于用户主目录
+    pub installed: bool,
 }
 
 // ===================== Agent (运行环境注册表) =====================
@@ -790,13 +793,16 @@ pub struct AgentRow {
     pub skills_dir: String,
     pub config_dir: String,
     pub mcp_config_file: String,
-    pub color: String,
     pub auto_scan: bool,
     pub scan_agents_dir: bool,
     pub enabled: bool,
     pub sort_order: i64,
     /// 能力声明，来自 agent_registry（builtin agent）或默认值（用户自建）。
     pub capabilities: AgentCapabilities,
+    /// 本机检测：skills/config 目录存在于用户主目录。仅查询时计算，不入库，
+    /// save_agent 从前端反序列化时允许缺省。
+    #[serde(default)]
+    pub installed: bool,
 }
 
 /// 前端按能力渲染入口，而不是按 agent id 特判。
@@ -850,7 +856,7 @@ pub struct ProjectRow {
 /// the hardcoded RUNTIMES if the agents table is somehow empty.
 pub fn db_agents(conn: &Connection) -> Vec<AgentRow> {
     let mut stmt = match conn.prepare(
-        "SELECT id, label, skills_dir, config_dir, mcp_config_file, color,
+        "SELECT id, label, skills_dir, config_dir, mcp_config_file,
               auto_scan, scan_agents_dir, enabled, sort_order
        FROM agents ORDER BY sort_order, label COLLATE NOCASE",
     ) {
@@ -864,12 +870,13 @@ pub fn db_agents(conn: &Connection) -> Vec<AgentRow> {
             skills_dir: row.get(2)?,
             config_dir: row.get(3)?,
             mcp_config_file: row.get(4)?,
-            color: row.get(5)?,
-            auto_scan: row.get::<_, i64>(6)? != 0,
-            scan_agents_dir: row.get::<_, i64>(7)? != 0,
-            enabled: row.get::<_, i64>(8)? != 0,
-            sort_order: row.get(9)?,
+            auto_scan: row.get::<_, i64>(5)? != 0,
+            scan_agents_dir: row.get::<_, i64>(6)? != 0,
+            enabled: row.get::<_, i64>(7)? != 0,
+            sort_order: row.get(8)?,
             capabilities: AgentCapabilities::for_agent(&row.get::<_, String>(0)?),
+            // 由查询方按用户主目录计算（见 get_agents / get_runtimes）
+            installed: false,
         })
     });
     rows.ok()

@@ -8,7 +8,19 @@ use tauri::State;
 #[tauri::command]
 pub fn get_agents(db: State<DbState>) -> Result<Vec<AgentRow>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    Ok(db_agents(&conn))
+    let home = dirs::home_dir();
+    Ok(db_agents(&conn)
+        .into_iter()
+        .map(|agent| AgentRow {
+            installed: home
+                .as_ref()
+                .map(|home| {
+                    crate::agent_registry::agent_installed_at(home, &agent.skills_dir, &agent.config_dir)
+                })
+                .unwrap_or(false),
+            ..agent
+        })
+        .collect())
 }
 
 /// Create or update an agent. If id matches an existing row, update; otherwise insert.
@@ -17,21 +29,21 @@ pub fn get_agents(db: State<DbState>) -> Result<Vec<AgentRow>, String> {
 pub fn save_agent(db: State<DbState>, agent: AgentRow) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let ts = now_iso();
+    // color 列已废弃（纯视觉字段移除），保留 NOT NULL 列并写固定值
     conn.execute(
        "INSERT INTO agents (id, label, skills_dir, config_dir, mcp_config_file, color, auto_scan, scan_agents_dir, enabled, sort_order, created_at, updated_at)
-        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11)
+        VALUES (?1,?2,?3,?4,?5,'slate',?6,?7,?8,?9,?10,?10)
         ON CONFLICT(id) DO UPDATE SET
           label=excluded.label, skills_dir=excluded.skills_dir, config_dir=excluded.config_dir,
-          mcp_config_file=excluded.mcp_config_file, color=excluded.color, auto_scan=excluded.auto_scan,
+          mcp_config_file=excluded.mcp_config_file, auto_scan=excluded.auto_scan,
           scan_agents_dir=excluded.scan_agents_dir,
-          sort_order=excluded.sort_order, updated_at=?11",
+          sort_order=excluded.sort_order, updated_at=?10",
        params![
            agent.id,
            agent.label,
            agent.skills_dir,
            agent.config_dir,
            agent.mcp_config_file,
-           agent.color,
            agent.auto_scan as i32,
            agent.scan_agents_dir as i32,
            agent.enabled as i32,
