@@ -86,6 +86,69 @@ function parseSemVer(version) {
   };
 }
 
+// Tauri JS↔Rust 版本配对：tauri CLI 在 build 时强制 npm 包与 Rust crate
+// 同 major/minor，错配直接终止构建（v0.0.5 Release build 曾因此失败）。
+// 发布准备与校验阶段先做同样检查，把失败从 CI 提前到本地。
+const TAURI_PACKAGE_PAIRS = [
+  { npm: "@tauri-apps/api", crate: "tauri" },
+  { npm: "@tauri-apps/plugin-process", crate: "tauri-plugin-process" },
+  { npm: "@tauri-apps/plugin-updater", crate: "tauri-plugin-updater" },
+];
+
+/** 解析 Cargo.lock 全部 [[package]] 的 name→version 映射。 */
+export function readCargoLockVersions(text) {
+  const versions = {};
+  let packageName;
+  for (const line of text.split("\n")) {
+    if (/^\s*\[\[package\]\]\s*$/.test(line)) {
+      packageName = undefined;
+      continue;
+    }
+    const nameMatch = line.match(/^\s*name\s*=\s*"([^"]+)"\s*$/);
+    if (nameMatch) {
+      packageName = nameMatch[1];
+      continue;
+    }
+    const versionMatch = line.match(/^\s*version\s*=\s*"([^"]+)"\s*$/);
+    if (packageName && versionMatch) {
+      versions[packageName] = versionMatch[1];
+      packageName = undefined;
+    }
+  }
+  return versions;
+}
+
+export function assertTauriPackagePairing({ packageLock, cargoLock }) {
+  const crateVersions = readCargoLockVersions(cargoLock);
+  const npmPackages = packageLock.packages ?? {};
+  const mismatches = [];
+
+  for (const { npm, crate } of TAURI_PACKAGE_PAIRS) {
+    const npmVersion = npmPackages[`node_modules/${npm}`]?.version;
+    const crateVersion = crateVersions[crate];
+    if (!npmVersion && !crateVersion) continue;
+    if (npmVersion && crateVersion) {
+      const npmSemVer = parseSemVer(npmVersion);
+      const crateSemVer = parseSemVer(crateVersion);
+      if (npmSemVer.major === crateSemVer.major && npmSemVer.minor === crateSemVer.minor) {
+        continue;
+      }
+    }
+    mismatches.push(
+      `${npm} (${npmVersion ?? "missing"}) : ${crate} (${crateVersion ?? "missing"})`,
+    );
+  }
+
+  if (mismatches.length > 0) {
+    throw new Error(
+      "Tauri npm packages and Rust crates are on different major/minor releases: " +
+        `${mismatches.join("; ")}. ` +
+        "Align them, e.g. `npm install @tauri-apps/<pkg>@^<crate-major>.<crate-minor>` or `cargo update -p <crate> --precise <npm-version>`.",
+    );
+  }
+}
+
+
 function filePath(root, file) {
   return join(root, file);
 }
@@ -201,7 +264,12 @@ export function readReleaseState(root = process.cwd()) {
     cargoLock: readCargoLockPackageVersion(cargoLock),
   };
 
-  return { ...versions, changelog };
+  return {
+    ...versions,
+    changelog,
+    packageLockData: packageLock,
+    cargoLockText: cargoLock,
+  };
 }
 
 export function assertReleaseVersionsAreConsistent(releaseState) {
@@ -417,6 +485,7 @@ export function prepareRelease(root, requestedVersion, date = formatLocalDate())
   const version = normalizeVersion(requestedVersion);
   const state = readReleaseState(root);
   const currentVersion = assertReleaseVersionsAreConsistent(state);
+  assertTauriPackagePairing({ packageLock: state.packageLockData, cargoLock: state.cargoLockText });
   assertVersionIsNewer(currentVersion, version);
 
   const unreleased = findUnreleasedSection(state.changelog);
@@ -476,6 +545,7 @@ export function verifyRelease(root, requestedVersion) {
   const version = normalizeVersion(requestedVersion);
   const state = readReleaseState(root);
   const currentVersion = assertReleaseVersionsAreConsistent(state);
+  assertTauriPackagePairing({ packageLock: state.packageLockData, cargoLock: state.cargoLockText });
 
   if (currentVersion !== version) {
     throw new Error(`Release files are at ${currentVersion}, expected ${version}`);
